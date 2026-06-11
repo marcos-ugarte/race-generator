@@ -1,0 +1,6 @@
+# Keep this directory in the repo, but never commit the generated artifacts
+# that the race-generator writes here at runtime:
+#   relay.db (+ -wal/-shm)  — the SQLite round/result store (regenerated each run)
+#   racegen-audit.jsonl     — the GLI replay/audit log (regenerated each run)
+*
+!.gitignore

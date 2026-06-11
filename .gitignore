@@ -1,0 +1,53 @@
+# Binaries
+/relay
+/relay-go
+/api
+/mcp
+/collector
+/collector-all
+/migrate
+/auth-verify
+/audit-anchor
+/race-generator
+/race-broadcaster
+/bin/
+*.exe
+
+# Database
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/*.jsonl
+data/training/
+
+# Test results
+test-results/
+test/parity_*/results/
+test/parity_*/test/
+
+# Scheduled-task lock (transient)
+.claude/scheduled_tasks.lock
+
+# Capture data (temporary comparison tools)
+tools/capture/
+
+# Environment
+.env
+
+# Dashboard
+web/dashboard/node_modules/
+web/dashboard/dist/
+web/dashboard/.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Test downloads — never commit binary blobs
+ds-tools/videos_download/
+ds-tools/__pycache__/
+*.pyc
+.local-vps-cert.pem
