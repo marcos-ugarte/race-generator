@@ -45,5 +45,46 @@ services:
     # Healthcheck is inherited from the Dockerfile (WAL freshness). Override
     # here only if you need different intervals.
 
+  # race-feed: the public READ surface (REST + WebSocket) over the SAME
+  # relay.db the generator writes. It is a reader-only consumer — it opens
+  # the DB but never writes it (the generator is the sole writer).
+  race-feed:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: feed
+      args:
+        VERSION: ${VERSION:-dev}
+        COMMIT: ${COMMIT:-unknown}
+    image: race-feed:${VERSION:-dev}
+    container_name: vg-race-feed
+    restart: unless-stopped
+    user: "1000:1000"
+    depends_on:
+      - race-generator
+    ports:
+      - "4198:4198"
+    environment:
+      RACEGEN_FEED_PORT: "4198"
+      DB_PATH: /data/relay.db
+      # RACEGEN_FEED_TICK_MS: "1000"
+      # RACEGEN_FEED_GAMETYPES: dog8,dog6,horse_classic
+      RACEGEN_WS_MAX_CONNECTIONS: "500"
+      #
+      # ── AUTH (set real keys before exposing publicly) ──────────────────
+      # When RACEGEN_PUBLIC_REQUIRE_KEY=true, BOTH the REST endpoints and
+      # the WS upgrade require a valid X-API-Key (or ?apikey=). Keys must
+      # match ^[A-Za-z0-9_-]{16,64}$. NEVER commit a real key — inject at
+      # deploy time (.env kept out of git or a secrets manager).
+      RACEGEN_PUBLIC_REQUIRE_KEY: "false"
+      # RACEGEN_API_KEYS: "<csv-of-partner-keys — inject, do not commit>"
+      # RACEGEN_ADMIN_KEYS: "<csv-of-admin-keys — inject, do not commit>"
+    volumes:
+      # Shared volume with the generator. The feed only reads; the
+      # named-volume form is read-write because a SQLite WAL reader may
+      # need to create/refresh the -shm/-wal sidecars.
+      - racegen-data:/data
+    # Healthcheck is inherited from the Dockerfile feed target (/v1/healthz).
+
 volumes:
   racegen-data:

@@ -35,11 +35,45 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux go build \
         -trimpath \
         -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
-        -o /out/race-generator ./cmd/race-generator
+        -o /out/race-generator ./cmd/race-generator && \
+    CGO_ENABLED=0 GOOS=linux go build \
+        -trimpath \
+        -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+        -o /out/feed ./cmd/feed
 
-# ---------- runtime ----------
+# ---------- feed runtime ----------
+# The public READ surface (REST + WebSocket) over the SAME relay.db the
+# generator writes. Declared BEFORE the generator `runtime` stage so the
+# DEFAULT build target stays `runtime` (the generator) — build the feed
+# explicitly with `docker build --target feed -t race-feed .`.
+#
+# Reader-only: the binary opens relay.db but never writes it (the
+# generator is the sole writer). Mount the same /data volume, RO if your
+# orchestrator supports a shared RO bind for SQLite WAL.
+FROM alpine:3.19 AS feed
+RUN apk add --no-cache ca-certificates tzdata wget && \
+    addgroup -S -g 1000 app && adduser -S -u 1000 -G app app && \
+    mkdir -p /data && chown app:app /data
+
+COPY --from=builder /out/feed /app/feed
+
+ENV DB_PATH=/data/relay.db \
+    RACEGEN_FEED_PORT=4198
+EXPOSE 4198
+VOLUME ["/data"]
+USER app
+
+# Liveness probe hits the feed's own /v1/healthz.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -q -O /dev/null "http://127.0.0.1:${RACEGEN_FEED_PORT}/v1/healthz" || exit 1
+
+ENTRYPOINT ["/app/feed"]
+
+# ---------- runtime (DEFAULT target — the generator) ----------
 # Alpine over distroless because we want `wget` for healthchecks and `tzdata`
 # (raceutil reads Europe/Malta at runtime — IMPRESCINDIBLE para el idRace epoch).
+# Kept LAST so a plain `docker build .` still produces the generator image,
+# byte-for-byte the same as before the feed stage was added.
 FROM alpine:3.19 AS runtime
 RUN apk add --no-cache ca-certificates tzdata wget && \
     addgroup -S -g 1000 app && adduser -S -u 1000 -G app app && \
