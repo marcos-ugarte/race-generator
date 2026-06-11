@@ -259,7 +259,6 @@ func TestIsTransientErr_Classification(t *testing.T) {
 	}
 }
 
-
 // TestLoadEnv_SeedHexNonHexRejected verifies that a 64-char seed of
 // non-hex characters is rejected by loadEnv BEFORE any file is opened.
 // Regression for the orphan-audit-file bug pre-Fix 5.

@@ -224,8 +224,8 @@ type GameTypeConfigExt struct {
 	ShapeConcentrationSigma   float64
 	ShapeConcentrationSigmaLo float64
 	MaxOdds                   float64
-	PositionConstraints     []PositionConstraint
-	CombinedFactor          PositionConstraint
+	PositionConstraints       []PositionConstraint
+	CombinedFactor            PositionConstraint
 
 	// OddsFinishCoupling couples WIN-odds-value assignment to the chosen
 	// finish order (favorite-win bias). Theta=0 reproduces legacy uniform
@@ -249,9 +249,9 @@ type GameTypeConfigExt struct {
 	VideoIDPrefix    string // "DOG8", "DOG6"
 	VideoNameLiteral bool   // true: pool IDs ARE the real video stem (horse_classic 7-digit) — skip R%04d
 	FinishTimeRange  Range
-	GapRange        Range
-	GapExponent     float64
-	IntervalCount   int
+	GapRange         Range
+	GapExponent      float64
+	IntervalCount    int
 
 	// IPF targets — percentages.
 	//
@@ -454,11 +454,11 @@ func dog8Config() GameTypeConfigExt {
 		// the tail below MaxOdds so longshots don't over-tie at the hard clamp.
 		// See doc 09 §4.
 		RankGap: RankGapModel{
-			Enabled: true,
-			GapMean: []float64{0.75, 0.66, 0.93, 1.31, 1.77, 2.34, 2.62},
-			GapStd:  []float64{0.53, 0.41, 0.53, 0.67, 0.89, 1.05, 1.15},
-			GapMin:  []float64{-1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0},
-			GapMax:  []float64{3, 3, 4, 5, 6, 7, 9},
+			Enabled:         true,
+			GapMean:         []float64{0.75, 0.66, 0.93, 1.31, 1.77, 2.34, 2.62},
+			GapStd:          []float64{0.53, 0.41, 0.53, 0.67, 0.89, 1.05, 1.15},
+			GapMin:          []float64{-1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0},
+			GapMax:          []float64{3, 3, 4, 5, 6, 7, 9},
 			OddsFloor:       1.8,
 			LongshotMaxOdds: 17.0,
 		},
@@ -646,11 +646,11 @@ func dog6Config() GameTypeConfigExt {
 		// DS mean gaps 0.53/0.66/1.14/1.82/2.36). Same solve as dog8 (negative
 		// GapMin folds to an exact-tie point-mass). See dog8 RankGap note + doc 09.
 		RankGap: RankGapModel{
-			Enabled: true,
-			GapMean: []float64{0.53, 0.66, 1.16, 1.85, 2.40},
-			GapStd:  []float64{0.345, 0.39, 0.60, 0.84, 1.08},
-			GapMin:  []float64{-1.0, -1.0, -1.0, -1.0, -1.0},
-			GapMax:  []float64{3, 4, 5, 7, 8},
+			Enabled:         true,
+			GapMean:         []float64{0.53, 0.66, 1.16, 1.85, 2.40},
+			GapStd:          []float64{0.345, 0.39, 0.60, 0.84, 1.08},
+			GapMin:          []float64{-1.0, -1.0, -1.0, -1.0, -1.0},
+			GapMax:          []float64{3, 4, 5, 7, 8},
 			OddsFloor:       2.0,
 			LongshotMaxOdds: 12.5,
 		},
@@ -748,6 +748,7 @@ func dog6Config() GameTypeConfigExt {
 //   - OddsFinishCoupling uses the Mallows RIM (UsePL=false) with a modest
 //     Theta to give a mild favorite-win bias without claiming a calibrated PL
 //     weight vector we do not have.
+//
 // Per-sorted-rank marginals + RankGap/ForecastRank/PL calibration from Elastic
 // are a follow-up (camino "paridad real"); until then horse_classic odds are a
 // placeholder and the GLI gate MUST stay closed for betoffer 241 (the
@@ -823,10 +824,10 @@ func horseClassicConfig() GameTypeConfigExt {
 		VideoFileSuffix:  "", // real files are "1237465.mp4" — no quality suffix
 		VideoIDPrefix:    "", // pool IDs are bare 7-digit, no prefix
 		VideoNameLiteral: true,
-		FinishTimeRange: Range{Min: 28.54, Max: 30.12},
-		GapRange:        Range{Min: 0.01, Max: 0.60},
-		GapExponent:     2.7,
-		IntervalCount:   2,
+		FinishTimeRange:  Range{Min: 28.54, Max: 30.12},
+		GapRange:         Range{Min: 0.01, Max: 0.60},
+		GapExponent:      2.7,
+		IntervalCount:    2,
 
 		// IPF targets — UNIFORM (7 boxes). DS horse_classic plays ~uniform and
 		// we have no per-box DS table for 241. Sums to ≈100. IPF normalizes.

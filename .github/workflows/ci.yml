@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: gofmt (fail on diff)
+        run: |
+          fmtout="$(gofmt -l .)"
+          if [ -n "$fmtout" ]; then
+            echo "::error::gofmt found unformatted files:"
+            echo "$fmtout"
+            exit 1
+          fi
+
+      # Includes the golden vectors (rng/seed_golden_test.go,
+      # generators/golden_test.go) — the determinism / GLI replay guarantee.
+      - name: Test
+        run: go test ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    # Optional gate: report but don't block the build-test job.
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest

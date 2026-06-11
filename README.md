@@ -50,6 +50,8 @@ Prometheus dependencies of the monolith are gone.
 
 ## Run it
 
+### Local (`go run`)
+
 ```bash
 mkdir -p data
 
@@ -58,18 +60,47 @@ RACEGEN_SEED_HEX=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 DB_PATH=./data/relay.db \
 RACEGEN_GAMETYPES=dog8,dog6 \
 go run ./cmd/race-generator
+
+# Or via Makefile (same fixed dev seed, all three disciplines):
+make run-local
 ```
 
 Rounds land in the `GameRounds` table (and results in `GameResults`) of
 `data/relay.db`. The audit log streams to `data/racegen-audit.jsonl`. Both are
-git-ignored (`data/.gitignore`).
+git-ignored.
+
+### Docker
+
+```bash
+# Build the self-contained image (multi-stage, static binary, non-root):
+docker build -t race-generator:dev .       # or: make docker-build
+
+# Run standalone (relay.db + audit persist on a named volume):
+docker compose up --build
+```
+
+The container publishes no ports (no HTTP/WS surface yet — that is Paso 2).
+Its HEALTHCHECK is a WAL-freshness probe: the generator writes continuously, so
+`/data/relay.db-wal` (or the checkpointed `/data/relay.db`) must have been
+touched within the last 600s.
+
+> **Seed in prod/staging.** `docker-compose.yml` ships safe dev defaults with an
+> *empty* seed (crypto/rand, non-reproducible). With `APP_ENV=prod|staging|stg`
+> the binary **fail-closes unless `RACEGEN_SEED_HEX` is set** (GLI replay). Inject
+> the seed at deploy time — never hardcode a real seed in the compose file.
 
 ## Build & test
 
 ```bash
-go build ./...
-go test ./internal/racegen/... ./internal/sqlite/... ./internal/raceutil/...
+make build   # static binary -> ./race-generator
+make test    # go test ./...  (includes the golden vectors)
+make vet
+make fmt
+make lint    # golangci-lint if installed; otherwise a no-op
 ```
+
+CI (`.github/workflows/ci.yml`) runs `go build`, `go vet`, a `gofmt -l` diff
+check (fails on any unformatted file), and `go test ./...` on every push and PR.
 
 The `generators/golden_test.go` and `rng/seed_golden_test.go` golden vectors pin
 the RNG output. **If a golden test fails, do not rebaseline it** — it means the

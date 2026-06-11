@@ -1,0 +1,49 @@
+# Standalone docker-compose for vg-racegen.
+#
+# Single service: the pure race producer. It writes rounds + results into a
+# named volume (relay.db) plus an append-only GLI audit log. No ports are
+# published — this binary has no HTTP/WS surface (that is Paso 2).
+#
+#   docker compose up --build        # build + run with dev defaults
+#   VERSION=1.2.3 docker compose up   # tag the built image
+#
+services:
+  race-generator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+        COMMIT: ${COMMIT:-unknown}
+    image: race-generator:${VERSION:-dev}
+    container_name: vg-race-generator
+    restart: unless-stopped
+    # Non-root (matches the Dockerfile's `app` user, uid/gid 1000).
+    user: "1000:1000"
+    environment:
+      # Output DB + audit log live on the named volume so they persist.
+      DB_PATH: /data/relay.db
+      RACEGEN_AUDIT_PATH: /data/racegen-audit.jsonl
+      RACEGEN_GAMETYPES: dog6,dog8,horse_classic
+      # ── Optional tuning (defaults shown; uncomment to override) ──
+      # RACEGEN_HORIZON: "25"
+      # RACEGEN_TICK_MS: "1000"
+      # RACEGEN_JACKPOT_INIT: "45000"
+      #
+      # ── SEED (GLI) ─────────────────────────────────────────────────────
+      # APP_ENV unset/dev  → empty seed allowed (crypto/rand, NON-reproducible).
+      # APP_ENV=prod|staging|stg → RACEGEN_SEED_HEX is MANDATORY (the binary
+      #   fail-closes without it) so the audit log can be replayed for GLI-19.
+      #
+      # NEVER hardcode a real production seed in this file. Inject it at deploy
+      # time (e.g. `RACEGEN_SEED_HEX=$(...) docker compose up`, an .env file
+      # kept out of git, or a secrets manager).
+      # APP_ENV: prod
+      # RACEGEN_SEED_HEX: "<64-hex-char seed — inject, do not commit>"
+    volumes:
+      - racegen-data:/data
+    # Healthcheck is inherited from the Dockerfile (WAL freshness). Override
+    # here only if you need different intervals.
+
+volumes:
+  racegen-data:

@@ -292,7 +292,6 @@ func openBuggy(t *testing.T, path string) (*sql.DB, error) {
 	return d, nil
 }
 
-
 // TestInit_Concurrent_FreshDB pins down the pre-existing cold-start race
 // that lived in Init() before the busy_timeout-via-DSN fix.
 //

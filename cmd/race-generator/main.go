@@ -12,7 +12,7 @@
 //   - DB_PATH                ruta a relay.db (default ./data/relay.db)
 //   - RACEGEN_GAMETYPES      coma-separados (default = config.SupportedGameTypes())
 //   - RACEGEN_SEED_HEX       64 hex; vacio => crypto/rand + warning (solo dev).
-//                            REQUERIDO si APP_ENV in {prod,staging,stg} (GLI-19 §3.3)
+//     REQUERIDO si APP_ENV in {prod,staging,stg} (GLI-19 §3.3)
 //   - APP_ENV                prod | staging | stg | dev (gatea el fail-closed del seed)
 //   - RACEGEN_AUDIT_PATH     default ./data/racegen-audit.jsonl
 //   - RACEGEN_JACKPOT_INIT   default = generators.JackpotInitialValue
@@ -65,6 +65,16 @@ type envConfig struct {
 // Default 25 ≈ 100 min (25×240s) of buffer. Overridable via RACEGEN_HORIZON
 // (set from env in main() before bootBackfill/bootBulk).
 var bulkSize = 25
+
+// version and commit are injected at build time via
+//
+//	-ldflags "-X main.version=... -X main.commit=..."
+//
+// (see Dockerfile / Makefile). Defaults keep `go run` working.
+var (
+	version = "dev"
+	commit  = "unknown"
+)
 
 // bootBackfillPast is how many already-finished past rounds (plus the
 // current in-progress one) bootBackfill generates before the future
@@ -167,6 +177,7 @@ func (c *nameCooldown) Len() int { return len(c.queue) }
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.LUTC)
+	log.Printf("race-generator: version=%s commit=%s", version, commit)
 
 	env, err := loadEnv()
 	if err != nil {
