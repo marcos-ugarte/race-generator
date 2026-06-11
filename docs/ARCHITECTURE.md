@@ -259,21 +259,34 @@ Position)` (`uniqueIndexDDL`, línea 184) evita filas duplicadas por posición.
 El **broadcaster** (`/tv /pos /web` WS/HTTP) y el **settlement** (apuestas,
 tickets, jackpot real, `internal/pgpos`) NO viven aquí: acoplan dinero y
 PostgreSQL, y deben quedar fuera de la superficie RNG certificable. Este repo es
-simétrico a **`ds-capture`** (el productor del feed DS real): ambos escriben la
-**misma** `relay.db` con esquema lock-step (`sqlite.Fingerprint`, `sqlite.go:56`),
-con prefijos de `RoundCode` disjuntos (`GA*` vs `141_/241_/541_/...`).
+simétrico a **`ds-capture`** (el productor del feed DS real), pero **NO se
+mezclan**: cada uno corre por separado y escribe su **propia** base —
+`vg-racegen` → `relay.db` con rondas `GA*`; `ds-capture` → sus `collector-*.db`
+con rondas DS (`141_/241_/541_/...`). No comparten proceso, DB, puerto ni llaves.
+
+Lo que **se estandariza** (no se comparte) es la *forma*: el mismo **esquema**
+SQLite (lock-step, `sqlite.Fingerprint`, `sqlite.go:56`) y el mismo **contrato de
+feed** (`/v1/races` + WS — Paso 2), de modo que un consumidor usa **un solo
+cliente** para ambos productores. Los prefijos de `RoundCode` disjuntos (`GA*` vs
+DS) los mantienen inconfundibles aun si un consumidor leyera los dos.
 
 ```mermaid
 flowchart LR
-    subgraph Productores
-      VG["vg-racegen<br/>(GA — generadas)"]
-      DSC["ds-capture<br/>(DS — capturadas del vendor)"]
+    subgraph SVG["vg-racegen (GA) — servicio aislado"]
+      VG["generador"] --> RDBGA[("relay.db<br/>rondas GA*")]
+      RDBGA --> FGA["feed /v1/races + WS<br/>RACEGEN_API_KEYS"]
     end
-    VG --> RDB[("relay.db<br/>(esquema lock-step,<br/>RoundCode disjunto)")]
-    DSC --> RDB
-    RDB --> C1["virtuales-go<br/>/tv /pos /web + settlement"]
-    RDB --> C2["virteon-platform<br/>(consumidor/paridad)"]
+    subgraph SDS["ds-capture (DS) — servicio aislado"]
+      DSC["captura vendor"] --> RDBDS[("collector-*.db<br/>rondas DS")]
+      RDBDS --> FDS["feed /v1/races + WS<br/>DSCAPTURE_API_KEYS"]
+    end
+    FGA --> C1["virtuales-go"]
+    FDS --> C1
+    FGA --> C2["virteon-platform"]
+    FDS --> C2
 ```
+
+Mismo **contrato**, dos servicios **separados**: estandarización, no fusión.
 
 ---
 
