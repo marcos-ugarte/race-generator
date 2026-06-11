@@ -16,6 +16,18 @@ public/POS servers. This separation keeps the certifiable RNG surface (the
 deterministic draw that decides each race's winner) isolated from everything
 that touches a wallet.
 
+## Documentación
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — arquitectura: los 4
+  componentes (RNG / Generador / Relay / frontera Broadcaster), el núcleo RNG
+  certificable GLI, flujo de datos, esquema del `relay.db`, determinismo,
+  fronteras productor↔consumidor y roadmap. Con diagramas Mermaid.
+- [`docs/MANUAL.md`](docs/MANUAL.md) — manual de uso y operación: quick start
+  (local + Docker), tabla completa de env vars, disciplinas, despliegue, verificación,
+  reproducibilidad/replay GLI, troubleshooting y build/test.
+
+El resto de este README queda como entrada rápida.
+
 ## What's inside
 
 - `cmd/race-generator/` — the binary's entrypoint (`main.go`).
