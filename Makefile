@@ -57,6 +57,34 @@ run-lab: ## Run the gli_lab build with a deterministic seed (lab replay only).
 test-lab: ## Full test suite under the gli_lab build tag.
 	go test -tags gli_lab ./...
 
+# ── GLI evidence extraction (docs/PLAN-CERTIFICACION-GLI19.md Fase 5) ────────
+# Reproducible: fixed lab seed + recorded binary hash. Override EVIDENCE_SEED
+# for a fresh evidence run and record it in evidencia/README.
+EVIDENCE_SEED ?= 5eed0f60c11900000000000000000000000000000000000000000000000000aa
+EVIDENCE_DIR  ?= evidencia
+
+evidence-tools: ## Build the GLI collection tools (prod + lab flavors) and record hashes.
+	mkdir -p $(EVIDENCE_DIR)
+	go build -trimpath -o $(EVIDENCE_DIR)/rngextract ./cmd/rngextract
+	go build -trimpath -tags gli_lab -o $(EVIDENCE_DIR)/rngextract-lab ./cmd/rngextract
+	sha256sum $(EVIDENCE_DIR)/rngextract $(EVIDENCE_DIR)/rngextract-lab | tee $(EVIDENCE_DIR)/hashes.txt
+
+evidence-bits: evidence-tools ## Raw Output Collection: 1 GB raw DRBG stream (lab seed, reproducible).
+	$(EVIDENCE_DIR)/rngextract-lab -mode bits -seed $(EVIDENCE_SEED) \
+		-bytes 1000000000 -out $(EVIDENCE_DIR)/bits-1g.bin 2>>$(EVIDENCE_DIR)/run.log
+
+evidence-games: evidence-tools ## Final Outcome Collection: 10M outcomes per game type (lab seed).
+	for gt in dog8 dog6 horse_classic; do \
+		$(EVIDENCE_DIR)/rngextract-lab -mode game -seed $(EVIDENCE_SEED) \
+			-gametype $$gt -count 10000000 -out $(EVIDENCE_DIR)/games-$$gt.csv 2>>$(EVIDENCE_DIR)/run.log; \
+	done
+
+evidence-int: evidence-tools ## Scaled-output evidence: 10M draws on ranges 6 and 8 (R8 rejection sampling).
+	$(EVIDENCE_DIR)/rngextract-lab -mode int -seed $(EVIDENCE_SEED) -min 1 -max 6 \
+		-count 10000000 -out $(EVIDENCE_DIR)/int-range6.csv 2>>$(EVIDENCE_DIR)/run.log
+	$(EVIDENCE_DIR)/rngextract-lab -mode int -seed $(EVIDENCE_SEED) -min 1 -max 8 \
+		-count 10000000 -out $(EVIDENCE_DIR)/int-range8.csv 2>>$(EVIDENCE_DIR)/run.log
+
 run-feed: ## Run the feed locally against ./data/relay.db (reader; dev defaults).
 	DB_PATH=$${DB_PATH:-./data/relay.db} \
 	RACEGEN_FEED_PORT=$${RACEGEN_FEED_PORT:-4198} \

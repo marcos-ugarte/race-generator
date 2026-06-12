@@ -51,3 +51,7 @@ ds-tools/videos_download/
 ds-tools/__pycache__/
 *.pyc
 .local-vps-cert.pem
+/rngextract
+
+# GLI evidence runs (large generated data — hashes recorded separately)
+evidencia/

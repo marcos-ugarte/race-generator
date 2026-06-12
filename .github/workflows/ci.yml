@@ -44,16 +44,18 @@ jobs:
       - name: Test (gli_lab)
         run: go test -tags gli_lab ./...
 
-      # GLI-19 evidence-of-absence gate: the production binary must contain
+      # GLI-19 evidence-of-absence gate: production binaries must contain
       # neither the MT19937 test scaffolding nor the gli_lab entropy expander.
-      - name: Verify prod binary excludes lab RNG paths
+      - name: Verify prod binaries exclude lab RNG paths
         run: |
-          go build -trimpath -o /tmp/racegen-prod ./cmd/race-generator
-          if go tool nm /tmp/racegen-prod | grep -qi 'mt19937\|LabEntropy'; then
-            echo "::error::production binary contains lab/test RNG symbols"
-            go tool nm /tmp/racegen-prod | grep -i 'mt19937\|LabEntropy'
-            exit 1
-          fi
+          for cmd in race-generator rngextract; do
+            go build -trimpath -o /tmp/$cmd-prod ./cmd/$cmd
+            if go tool nm /tmp/$cmd-prod | grep -qi 'mt19937\|LabEntropy'; then
+              echo "::error::$cmd production binary contains lab/test RNG symbols"
+              go tool nm /tmp/$cmd-prod | grep -i 'mt19937\|LabEntropy'
+              exit 1
+            fi
+          done
 
   lint:
     runs-on: ubuntu-latest
