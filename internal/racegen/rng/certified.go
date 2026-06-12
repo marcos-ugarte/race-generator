@@ -2,9 +2,17 @@ package rng
 
 import "math"
 
-// CertifiedFloat: float64 uniforme en [0, 1).
+// CertifiedFloat: float64 uniforme en [0, 1) con 53 bits de resolución.
+//
+// Consume DOS uint32 (alto primero) y usa los 53 bits superiores del par —
+// la resolución completa de la mantisa float64. La variante anterior de 32
+// bits cuantizaba las probabilidades del selector IPF y de Plackett-Luce a
+// múltiplos de 2^-32 (hallazgo H6, docs/AUDITORIA-RNG-GLI19.md); con 53
+// bits la cuantización queda por debajo de cualquier umbral observable.
 func CertifiedFloat(src Source) float64 {
-	return float64(src.NextUint32()) / 4294967296.0
+	hi := uint64(src.NextUint32())
+	lo := uint64(src.NextUint32())
+	return float64((hi<<32|lo)>>11) / (1 << 53)
 }
 
 // CertifiedInt: entero uniforme en [min, max] inclusive.
