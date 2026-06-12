@@ -17,6 +17,15 @@ type Source interface {
 	GenerationCount() uint64
 }
 
+// Reseeder is implemented by sources that support explicit reseeding
+// (HMACDRBG). The orchestrator reseeds at every round boundary — background
+// cycling with real prediction resistance (GLI-19 §3.2.6). Sources without
+// reseed support (MT19937, tests) simply skip this step.
+type Reseeder interface {
+	Reseed(additional []byte) error
+	ReseedCount() uint64
+}
+
 // Advance discards n values from the source (GLI-19 background cycling).
 func Advance(src Source, n int) {
 	for i := 0; i < n; i++ {

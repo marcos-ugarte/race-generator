@@ -1,11 +1,16 @@
-// Package rng implementa el RNG certificado GLI-19 usado por el generador.
+// Package rng implementa la fuente de aleatoriedad certificada GLI-19 del
+// generador. La fuente de PRODUCCIÓN es el HMAC-DRBG SHA-256 (hmac_drbg.go,
+// SP 800-90A) sembrado de crypto/rand.
 //
-// MT19937 según Matsumoto & Nishimura (1997). Período 2^19937-1.
-// Espejo funcional de virteon-platform/packages/game-engine/src/rng/MersenneTwister.ts.
+// MT19937 (este archivo) según Matsumoto & Nishimura (1997), período
+// 2^19937-1, espejo funcional de virteon-platform MersenneTwister.ts.
+// Se conserva ÚNICAMENTE como Source determinista para tests (golden
+// vectors de paridad con el legacy TS) — NO es apto como fuente de
+// producción bajo GLI-19 (estado recuperable de 624 salidas; hallazgo H1
+// de docs/AUDITORIA-RNG-GLI19.md).
 package rng
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -70,22 +75,6 @@ func NewMT19937WithSeedHex(seedHex string) (*MT19937, error) {
 	}
 	mt.index = mtN
 	return mt, nil
-}
-
-// NewMT19937FromOSEntropy mezcla crypto/rand (32 bytes) y devuelve un MT19937
-// con seedHex generado dinámicamente. Devuelve también el seedHex para audit.
-// Para producción es preferible NewMT19937WithSeedHex con seed determinista.
-func NewMT19937FromOSEntropy() (*MT19937, string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return nil, "", fmt.Errorf("crypto/rand: %w", err)
-	}
-	seedHex := hex.EncodeToString(buf)
-	mt, err := NewMT19937WithSeedHex(seedHex)
-	if err != nil {
-		return nil, "", err
-	}
-	return mt, seedHex, nil
 }
 
 // NextUint32 emite un uint32 uniforme [0, 2^32-1].

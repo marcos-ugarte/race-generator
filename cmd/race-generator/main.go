@@ -11,9 +11,9 @@
 // Variables de entorno: ver bloque loadEnv() abajo.
 //   - DB_PATH                ruta a relay.db (default ./data/relay.db)
 //   - RACEGEN_GAMETYPES      coma-separados (default = config.SupportedGameTypes())
-//   - RACEGEN_SEED_HEX       64 hex; vacio => crypto/rand + warning (solo dev).
-//     REQUERIDO si APP_ENV in {prod,staging,stg} (GLI-19 §3.3)
-//   - APP_ENV                prod | staging | stg | dev (gatea el fail-closed del seed)
+//   - RACEGEN_SEED_HEX       64 hex. SOLO builds -tags gli_lab (replay del
+//     laboratorio); un build de produccion ABORTA si esta presente.
+//   - APP_ENV                prod | staging | stg | dev (informativo)
 //   - RACEGEN_AUDIT_PATH     default ./data/racegen-audit.jsonl
 //   - RACEGEN_JACKPOT_INIT   default = generators.JackpotInitialValue
 //   - RACEGEN_TICK_MS        frecuencia del scheduler (default 1000)
@@ -203,22 +203,20 @@ func main() {
 	}
 	defer func() { _ = sqlite.Close() }()
 
-	// RNG — UN solo MT19937 compartido entre runners.
-	mt, seedHex, err := makeMT(env.seedHex)
+	// RNG — UNA sola fuente certificada compartida entre runners
+	// (HMAC-DRBG SHA-256 en producción; ver source_prod.go / source_lab.go).
+	mt, srcDesc, err := makeSource(env.seedHex)
 	if err != nil {
 		log.Fatalf("race-generator: rng init: %v", err)
 	}
 
-	// Audit `init` entry — registra seedHex efectivamente usado.
-	seedSource := "RACEGEN_SEED_HEX"
-	if env.seedHex == "" {
-		seedSource = "crypto/rand"
-	}
+	// Audit `init` entry. NUNCA registra material de semilla (GLI-19 R4/R5
+	// — hallazgo H3): el descriptor identifica la fuente y, en builds de
+	// laboratorio, un fingerprint SHA-256 de la semilla.
 	if err := aud.Append(audit.Entry{
 		Kind: "init",
 		Payload: map[string]any{
-			"seedHex":     seedHex,
-			"seedSource":  seedSource,
+			"rngSource":   srcDesc,
 			"dbPath":      env.dbPath,
 			"gameTypes":   env.gameTypes,
 			"tickMs":      env.tickMS,
@@ -623,12 +621,22 @@ func generateAndPersist(
 	}
 
 	// 2. GLI-19 §3.2.6 background cycling AFTER this round, preparing
-	// the MT state for the NEXT round. Emit audit ONLY on success — we
+	// the source state for the NEXT round. Emit audit ONLY on success — we
 	// never want a state_mod entry that doesn't correspond to a real
 	// round-to-round transition.
 	sm, err := rng.ModifyStateBetweenGames(mt, gameID)
 	if err != nil {
 		return fmt.Errorf("state modifier: %w", err)
+	}
+	// 2.b Round-boundary reseed (sources that support it — the production
+	// HMAC-DRBG): real prediction resistance between rounds. In gli_lab
+	// builds the entropy expander is deterministic, so replay still holds.
+	reseeds := uint64(0)
+	if rs, ok := mt.(rng.Reseeder); ok {
+		if err := rs.Reseed([]byte(gameID)); err != nil {
+			return fmt.Errorf("round reseed: %w", err)
+		}
+		reseeds = rs.ReseedCount()
 	}
 	if err := aud.Append(audit.Entry{
 		Kind: "state_mod",
@@ -636,6 +644,7 @@ func generateAndPersist(
 			"gameId":  sm.GameID,
 			"reason":  sm.Reason,
 			"discard": sm.DiscardCount,
+			"reseeds": reseeds,
 		},
 	}); err != nil {
 		return fmt.Errorf("audit state_mod: %w", err)
@@ -676,29 +685,10 @@ func generateAndPersist(
 	return nil
 }
 
-// makeMT initializes the shared MT19937. If `seedHex` is empty, the
-// function pulls 32 bytes from crypto/rand and prints a stderr warning.
-// This empty-seed path only reaches here in dev: loadEnv fail-closes on
-// an empty seed when APP_ENV in {prod,staging,stg} so production runs are
-// always reproducible (audit-log replay — GLI-19 §3.3). Returns the
-// seedHex actually used so the audit `init` payload reflects reality.
-func makeMT(seedHex string) (*rng.MT19937, string, error) {
-	if seedHex == "" {
-		fmt.Fprintln(os.Stderr,
-			"race-generator: WARN — RACEGEN_SEED_HEX not set; sembrando con crypto/rand "+
-				"(audit log will record the generated seedHex, pero la corrida no es reproducible)")
-		mt, hex, err := rng.NewMT19937FromOSEntropy()
-		if err != nil {
-			return nil, "", fmt.Errorf("crypto/rand seed: %w", err)
-		}
-		return mt, hex, nil
-	}
-	mt, err := rng.NewMT19937WithSeedHex(seedHex)
-	if err != nil {
-		return nil, "", fmt.Errorf("RACEGEN_SEED_HEX: %w", err)
-	}
-	return mt, seedHex, nil
-}
+// rngPersonalization is the SP 800-90A personalization string for the
+// shared DRBG instance (see source_prod.go / source_lab.go). Not secret —
+// it identifies the consuming application in the instantiate seed material.
+const rngPersonalization = "vg-racegen/race-generator/v1"
 
 // loadEnv reads and validates the binary's environment variables. All
 // defaults live here (single source of truth — see the header comment).
@@ -782,17 +772,13 @@ func loadEnv() (envConfig, error) {
 		if _, err := hex.DecodeString(e.seedHex); err != nil {
 			return envConfig{}, fmt.Errorf("RACEGEN_SEED_HEX invalid hex: %w", err)
 		}
-	} else {
-		// Fail-closed: en prod/staging un seed ausente deja la corrida
-		// no-reproducible y rompe el replay del audit log que exige la
-		// certificación (GLI-19 §3.3 — known-input/seeding). Solo dev (o
-		// APP_ENV vacío) tolera el fallback crypto/rand de makeMT.
-		appEnv := strings.ToLower(strings.TrimSpace(os.Getenv("APP_ENV")))
-		switch appEnv {
-		case "prod", "production", "staging", "stg":
-			return envConfig{}, fmt.Errorf("RACEGEN_SEED_HEX is required when APP_ENV=%s (audit replay must be deterministic — GLI-19 §3.3)", appEnv)
-		}
 	}
+	// NOTE: whether a seed is allowed at all is decided per build by
+	// makeSource (source_prod.go / source_lab.go). Production builds REJECT
+	// any seed (GLI-19: production seeding must be unpredictable); gli_lab
+	// builds REQUIRE one. The previous fail-closed rule ("prod requires a
+	// seed for audit replay") inverted the standard and was finding H2 of
+	// docs/AUDITORIA-RNG-GLI19.md.
 
 	return e, nil
 }
