@@ -39,13 +39,23 @@ docker-build: ## Build the generator Docker image (IMAGE=$(IMAGE)).
 docker-build-feed: ## Build the feed Docker image (FEED_IMAGE=$(FEED_IMAGE)).
 	docker build --target feed --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t $(FEED_IMAGE) .
 
-run-local: ## Run locally against ./data (dev defaults; deterministic seed).
+run-local: ## Run locally against ./data (dev defaults; HMAC-DRBG from OS entropy).
+	mkdir -p data
+	DB_PATH=./data/relay.db \
+	RACEGEN_AUDIT_PATH=./data/racegen-audit.jsonl \
+	RACEGEN_GAMETYPES=$${RACEGEN_GAMETYPES:-dog6,dog8,horse_classic} \
+	go run ./cmd/race-generator
+
+run-lab: ## Run the gli_lab build with a deterministic seed (lab replay only).
 	mkdir -p data
 	RACEGEN_SEED_HEX=$${RACEGEN_SEED_HEX:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa} \
 	DB_PATH=./data/relay.db \
 	RACEGEN_AUDIT_PATH=./data/racegen-audit.jsonl \
 	RACEGEN_GAMETYPES=$${RACEGEN_GAMETYPES:-dog6,dog8,horse_classic} \
-	go run ./cmd/race-generator
+	go run -tags gli_lab ./cmd/race-generator
+
+test-lab: ## Full test suite under the gli_lab build tag.
+	go test -tags gli_lab ./...
 
 run-feed: ## Run the feed locally against ./data/relay.db (reader; dev defaults).
 	DB_PATH=$${DB_PATH:-./data/relay.db} \
