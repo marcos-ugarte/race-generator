@@ -327,7 +327,7 @@ func buildRunners(gameTypes []string, jackpotInit float64) ([]*gameTypeRunner, e
 //
 // SYNCHRONOUS by design: see main()'s "ready" log invariant in
 // 03-RACE-BROADCASTER.md (Riesgo #2 mitigation).
-func bootBulk(runners []*gameTypeRunner, mt *rng.MT19937, aud *audit.Log, now time.Time, n int) error {
+func bootBulk(runners []*gameTypeRunner, mt rng.Source, aud *audit.Log, now time.Time, n int) error {
 	for _, r := range runners {
 		for i := 0; i < n; i++ {
 			slot := r.scheduledSlot(now, i)
@@ -360,7 +360,7 @@ func bootBulk(runners []*gameTypeRunner, mt *rng.MT19937, aud *audit.Log, now ti
 // already-finished rounds (returns written=false), so a warm restart is a
 // no-op here. Does NOT touch r.lastSlot — that is the future-horizon edge,
 // owned by bootBulk/tickHorizon; the backfilled past slots are behind it.
-func bootBackfill(runners []*gameTypeRunner, mt *rng.MT19937, aud *audit.Log, now time.Time, pastCount int) error {
+func bootBackfill(runners []*gameTypeRunner, mt rng.Source, aud *audit.Log, now time.Time, pastCount int) error {
 	for _, r := range runners {
 		for k := -(pastCount + 1); k <= -1; k++ {
 			slot := r.scheduledSlot(now, k)
@@ -384,7 +384,7 @@ func bootBackfill(runners []*gameTypeRunner, mt *rng.MT19937, aud *audit.Log, no
 func runScheduler(
 	ctx context.Context,
 	runners []*gameTypeRunner,
-	mt *rng.MT19937,
+	mt rng.Source,
 	aud *audit.Log,
 	tick time.Duration,
 ) {
@@ -412,7 +412,7 @@ func runScheduler(
 // than intervalSec (default tick = 1s, interval = 240s), most ticks
 // are no-ops: only the tick that first crosses a new boundary advances
 // the horizon by one round.
-func tickHorizon(runners []*gameTypeRunner, mt *rng.MT19937, aud *audit.Log, now time.Time) {
+func tickHorizon(runners []*gameTypeRunner, mt rng.Source, aud *audit.Log, now time.Time) {
 	for _, r := range runners {
 		slot := r.scheduledSlot(now, bulkSize-1)
 		if !slot.After(r.lastSlot) {
@@ -436,7 +436,7 @@ func tickHorizon(runners []*gameTypeRunner, mt *rng.MT19937, aud *audit.Log, now
 // crash on the next tick. The audit log already has the partial state
 // up to the panic point (e.g. game_generated emitted, panic during
 // persist) — that's preserved for postmortem.
-func tickRunner(r *gameTypeRunner, slot time.Time, mt *rng.MT19937, aud *audit.Log) {
+func tickRunner(r *gameTypeRunner, slot time.Time, mt rng.Source, aud *audit.Log) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			log.Printf("race-generator: PANIC %s slot=%s: %v\n%s",
@@ -610,7 +610,7 @@ func (r *gameTypeRunner) scheduledSlot(now time.Time, n int) time.Time {
 func generateAndPersist(
 	r *gameTypeRunner,
 	slot time.Time,
-	mt *rng.MT19937,
+	mt rng.Source,
 	aud *audit.Log,
 ) error {
 	gameID := fmt.Sprintf("%s-%s", r.cfg.GameType, slot.UTC().Format("20060102T150405Z"))

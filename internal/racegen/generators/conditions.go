@@ -30,7 +30,7 @@ type Conditions struct {
 // calls is fixed (weather, wind dir, wind speed, temperature, humidity)
 // to match conditions.ts:36-50 and keep replay parity with the legacy
 // engine.
-func GenerateConditions(mt *rng.MT19937, cfg config.GameTypeConfigExt) Conditions {
+func GenerateConditions(mt rng.Source, cfg config.GameTypeConfigExt) Conditions {
 	weather := weightedWeather(mt, cfg)
 	windDir := windDirections[rng.CertifiedInt(mt, 0, len(windDirections)-1)]
 	windSpeed := rng.CertifiedInt(mt, cfg.WindSpeedRange.Min, cfg.WindSpeedRange.Max)
@@ -50,7 +50,7 @@ func GenerateConditions(mt *rng.MT19937, cfg config.GameTypeConfigExt) Condition
 // algorithm from conditions.ts:26-34. WeatherWeights are validated to
 // sum within [0.999, 1.001] at config init; small residual error is
 // absorbed by returning the last option as fallback.
-func weightedWeather(mt *rng.MT19937, cfg config.GameTypeConfigExt) string {
+func weightedWeather(mt rng.Source, cfg config.GameTypeConfigExt) string {
 	r := rng.CertifiedFloat(mt)
 	var cum float64
 	for i, w := range cfg.WeatherWeights {

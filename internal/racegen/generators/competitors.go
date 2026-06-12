@@ -47,7 +47,7 @@ type Competitor struct {
 // back to the full pool. Within a single race we apply rejection
 // sampling against a usedNames set to guarantee within-race uniqueness.
 // excludeNames may be nil.
-func GenerateCompetitors(mt *rng.MT19937, cfg config.GameTypeConfigExt, excludeNames map[string]bool) map[string]Competitor {
+func GenerateCompetitors(mt rng.Source, cfg config.GameTypeConfigExt, excludeNames map[string]bool) map[string]Competitor {
 	allNames := data.DogNames()
 	n := cfg.NumberCompetitor
 
@@ -91,7 +91,7 @@ func GenerateCompetitors(mt *rng.MT19937, cfg config.GameTypeConfigExt, excludeN
 // overwrites Name. Ranges are taken from cfg; the hard-coded ranges
 // (NumberOfSecond, NumberOfRaces, Nbr1, Nbr2, Nbr3, Trend) match the
 // legacy TS (competitors.ts:23-43).
-func generateCompetitor(mt *rng.MT19937, cfg config.GameTypeConfigExt) Competitor {
+func generateCompetitor(mt rng.Source, cfg config.GameTypeConfigExt) Competitor {
 	return Competitor{
 		Weight:            rng.CertifiedFloatRange(mt, cfg.WeightRange.Min, cfg.WeightRange.Max, 1),
 		NumberOfRaces:     rng.CertifiedInt(mt, 0, 9),
@@ -112,7 +112,7 @@ func generateCompetitor(mt *rng.MT19937, cfg config.GameTypeConfigExt) Competito
 
 // generateLast5 builds a 5-element separator-joined history string of
 // finishing positions in [1, maxPosition]. Matches competitors.ts:15-20.
-func generateLast5(mt *rng.MT19937, sep string, maxPosition int) string {
+func generateLast5(mt rng.Source, sep string, maxPosition int) string {
 	// Manual join — avoid pulling strings.Join + intermediate slice
 	// allocations on the per-race hot path.
 	var b []byte

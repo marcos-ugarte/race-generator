@@ -8,40 +8,47 @@ import (
 )
 
 // StateModification describe una operación GLI-19 §3.2.6 de "background cycling":
-// entre dos rondas se consume un número aleatorio (CSPRNG) de uint32 del MT19937
-// para que el estado no sea predecible a partir de la ronda anterior.
+// entre dos rondas se consume un número aleatorio de valores del Source para
+// que el estado no sea trivialmente continuo entre rondas.
+//
+// NOTA R4: el registro NO captura el estado interno del generador — sólo los
+// contadores de generación antes/después. Exponer el estado interno en un
+// log permitiría reconstruir el stream (inaceptable para la certificación).
 type StateModification struct {
 	GameID       string    `json:"gameId"`
 	Reason       string    `json:"reason"` // V1 siempre "between_games"
-	StateBefore  State     `json:"stateBefore"`
-	StateAfter   State     `json:"stateAfter"`
+	GenBefore    uint64    `json:"genBefore"`
+	GenAfter     uint64    `json:"genAfter"`
 	DiscardCount int       `json:"discardCount"` // [1,100]
 	Timestamp    time.Time `json:"timestamp"`
 }
 
-// ModifyStateBetweenGames consume entre 1 y 100 valores del MT19937 según
+// ModifyStateBetweenGames consume entre 1 y 100 valores del Source según
 // crypto/rand independiente, y retorna el registro auditable.
 //
-// La fuente del discard count NO es el propio MT19937 — viene de crypto/rand
+// La fuente del discard count NO es el propio Source — viene de crypto/rand
 // con rejection sampling para evitar sesgo de módulo.
-func ModifyStateBetweenGames(mt *MT19937, gameID string) (*StateModification, error) {
+func ModifyStateBetweenGames(src Source, gameID string) (*StateModification, error) {
+	if src == nil {
+		return nil, fmt.Errorf("rng: nil Source")
+	}
 	n, err := cryptoRandIntRange(1, 100)
 	if err != nil {
 		return nil, fmt.Errorf("CSPRNG: %w", err)
 	}
-	return modifyStateBy(mt, n, gameID), nil
+	return modifyStateBy(src, n, gameID), nil
 }
 
 // modifyStateBy es la variante con discard count fijo, usada por tests para
 // reproducir paso a paso una secuencia. NO es API pública.
-func modifyStateBy(mt *MT19937, n int, gameID string) *StateModification {
-	before := mt.State()
-	mt.Advance(n)
+func modifyStateBy(src Source, n int, gameID string) *StateModification {
+	before := src.GenerationCount()
+	Advance(src, n)
 	return &StateModification{
 		GameID:       gameID,
 		Reason:       "between_games",
-		StateBefore:  before,
-		StateAfter:   mt.State(),
+		GenBefore:    before,
+		GenAfter:     src.GenerationCount(),
 		DiscardCount: n,
 		Timestamp:    time.Now().UTC(),
 	}

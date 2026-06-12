@@ -108,7 +108,7 @@ type JackpotState struct {
 // for tests and harness code; in production this is a misconfiguration
 // that the binary's startup should reject (Task 14's responsibility).
 func GenerateGame(
-	mt *rng.MT19937,
+	mt rng.Source,
 	cfg config.GameTypeConfigExt,
 	sel *videoselector.Selector,
 	jp *JackpotState,
@@ -117,7 +117,7 @@ func GenerateGame(
 	aud *audit.Log,
 ) (Game, error) {
 	if mt == nil {
-		return Game{}, errors.New("generators: nil *rng.MT19937")
+		return Game{}, errors.New("generators: nil rng.Source")
 	}
 	if sel == nil {
 		return Game{}, errors.New("generators: nil *videoselector.Selector")

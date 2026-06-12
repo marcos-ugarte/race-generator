@@ -34,7 +34,7 @@ import (
 //
 // dog63 extended-odds bet types (3-14) are not in scope for Phase 3 —
 // only dog8 (NumberOdds=64) and dog6 (NumberOdds=36) are supported here.
-func GenerateOdds(mt *rng.MT19937, cfg config.GameTypeConfigExt, finishOrder []int) []float64 {
+func GenerateOdds(mt rng.Source, cfg config.GameTypeConfigExt, finishOrder []int) []float64 {
 	win := generateWinOdds(mt, cfg, finishOrder)
 	forecast := generateForecastOdds(mt, win, cfg)
 
@@ -51,7 +51,7 @@ func GenerateOdds(mt *rng.MT19937, cfg config.GameTypeConfigExt, finishOrder []i
 // (drawOverroundTarget) BEFORE the attempt loop, so the realized margin varies
 // race-to-race exactly as the vendor's does, instead of every race collapsing
 // to a single fixed target. The draw consumes one certified Normal per race.
-func generateWinOdds(mt *rng.MT19937, cfg config.GameTypeConfigExt, finishOrder []int) []float64 {
+func generateWinOdds(mt rng.Source, cfg config.GameTypeConfigExt, finishOrder []int) []float64 {
 	const maxAttempts = 100
 	n := cfg.WinOddsCount
 
@@ -112,7 +112,7 @@ func generateWinOdds(mt *rng.MT19937, cfg config.GameTypeConfigExt, finishOrder 
 // reject at different rates than the per-position ones — so this path remaps
 // the MT stream (and thus the downstream jackpot). That remap is intentional
 // and is why golden_test.go is rebaselined.
-func generateWinOddsRankSpace(mt *rng.MT19937, cfg config.GameTypeConfigExt, finishOrder []int, ovTarget, kappa float64, maxAttempts int) []float64 {
+func generateWinOddsRankSpace(mt rng.Source, cfg config.GameTypeConfigExt, finishOrder []int, ovTarget, kappa float64, maxAttempts int) []float64 {
 	n := cfg.WinOddsCount
 	rg := cfg.RankGap
 	s := make([]float64, n)
@@ -172,7 +172,7 @@ func softCapOdds(v, soft, hard float64) float64 {
 // == 0 (or no shift configured) it returns the fixed target — legacy behavior.
 // The result is clamped to a sane band so an extreme Z can't produce a
 // degenerate book.
-func drawOverroundTarget(mt *rng.MT19937, cfg config.GameTypeConfigExt) float64 {
+func drawOverroundTarget(mt rng.Source, cfg config.GameTypeConfigExt) float64 {
 	if cfg.OverroundLogSigma <= 0 || cfg.OverroundShift <= 0 || cfg.OverroundShift >= cfg.OverroundTarget {
 		return cfg.OverroundTarget
 	}
@@ -195,7 +195,7 @@ func drawOverroundTarget(mt *rng.MT19937, cfg config.GameTypeConfigExt) float64 
 // (flatten) when set, else the same sigma — a split-lognormal that gives DS's
 // heavier strong-favorite tail. sigma==0 ⇒ kappa=1 (legacy fixed shape). One
 // certified Normal per race. See ShapeConcentrationSigma.
-func drawShapeConcentration(mt *rng.MT19937, cfg config.GameTypeConfigExt) float64 {
+func drawShapeConcentration(mt rng.Source, cfg config.GameTypeConfigExt) float64 {
 	if cfg.ShapeConcentrationSigma <= 0 {
 		return 1.0
 	}
@@ -231,7 +231,7 @@ func applyShapeConcentration(odds []float64, kappa float64) {
 // routed through the same coupleWinOdds assignment so the fallback path
 // also produces favorite-biased odds (it must NOT silently emit
 // uncorrelated odds).
-func generateWinOddsFallback(mt *rng.MT19937, cfg config.GameTypeConfigExt, finishOrder []int) []float64 {
+func generateWinOddsFallback(mt rng.Source, cfg config.GameTypeConfigExt, finishOrder []int) []float64 {
 	n := cfg.WinOddsCount
 	weights := make([]float64, n)
 	var total float64
@@ -272,7 +272,7 @@ func generateWinOddsFallback(mt *rng.MT19937, cfg config.GameTypeConfigExt, fini
 // finishOrder must be a permutation of 1..n. If it is missing or
 // malformed (defensive), we fall back to a plain certified shuffle of the
 // values so determinism and the value multiset are still preserved.
-func coupleWinOdds(mt *rng.MT19937, cfg config.GameTypeConfigExt, finishOrder []int, values []float64) []float64 {
+func coupleWinOdds(mt rng.Source, cfg config.GameTypeConfigExt, finishOrder []int, values []float64) []float64 {
 	n := len(values)
 
 	sorted := make([]float64, n)
@@ -328,7 +328,7 @@ func coupleWinOdds(mt *rng.MT19937, cfg config.GameTypeConfigExt, finishOrder []
 //     (finish-rank r always gets value-rank r; rank-1 favorite always wins).
 //
 // Uses ONLY rng.CertifiedFloat for the GLI-19 certified stream.
-func mallowsAssign(mt *rng.MT19937, n int, theta float64) []int {
+func mallowsAssign(mt rng.Source, n int, theta float64) []int {
 	// list holds element labels (finish-ranks) in current insertion order.
 	list := make([]int, 0, n)
 	weights := make([]float64, 0, n+1)
@@ -379,7 +379,7 @@ func mallowsAssign(mt *rng.MT19937, n int, theta float64) []int {
 //
 // Draws exactly n-1 rng.CertifiedFloat values (the last position is forced).
 // Uses ONLY the GLI-19 certified stream.
-func plackettLuceAssign(mt *rng.MT19937, w []float64) []int {
+func plackettLuceAssign(mt rng.Source, w []float64) []int {
 	n := len(w)
 	avail := make([]int, n) // remaining value-ranks
 	for i := range avail {
@@ -410,7 +410,7 @@ func plackettLuceAssign(mt *rng.MT19937, w []float64) []int {
 
 // generateForecastOdds: ordered pairs (i, j) i != j, base = win[i]*win[j]
 // times a Normal-clamped CombinedFactor, rounded 1dp. Length = n*(n-1).
-func generateForecastOdds(mt *rng.MT19937, win []float64, cfg config.GameTypeConfigExt) []float64 {
+func generateForecastOdds(mt rng.Source, win []float64, cfg config.GameTypeConfigExt) []float64 {
 	n := cfg.WinOddsCount
 	cf := cfg.CombinedFactor
 
