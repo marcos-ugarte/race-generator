@@ -30,6 +30,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"fmt"
+	"hash"
 )
 
 const (
@@ -58,6 +59,13 @@ type HMACDRBG struct {
 	key [sha256.Size]byte // K
 	v   [sha256.Size]byte // V
 
+	// mac es el HMAC pre-keyed con K vigente, reutilizado en el bucle de
+	// generación (V = HMAC(K,V) por bloque). Se reconstruye en cada cambio
+	// de K (update). Evita re-derivar el key schedule y ~4 allocs por
+	// bloque de 32 bytes — material en las corridas de evidencia GB-scale
+	// (rngextract -mode bits). La salida es bit-idéntica (KATs CAVP).
+	mac hash.Hash
+
 	es            EntropySource
 	reseedCounter uint64 // peticiones de generación desde el último (re)seed
 	reseeds       uint64 // número de reseeds realizados (audit)
@@ -83,7 +91,9 @@ func NewHMACDRBG(es EntropySource, personalization []byte) (*HMACDRBG, error) {
 	for i := range d.v {
 		d.v[i] = 0x01
 	}
-	d.update(append(seed, personalization...))
+	material := append(seed, personalization...)
+	d.update(material)
+	zeroize(material)
 	d.reseedCounter = 1
 	return d, nil
 }
@@ -97,25 +107,36 @@ func (d *HMACDRBG) Reseed(additional []byte) error {
 	if err := d.es.Entropy(entropy); err != nil {
 		return fmt.Errorf("rng: reseed entropy: %w", err)
 	}
-	d.update(append(entropy, additional...))
+	material := append(entropy, additional...)
+	d.update(material)
+	zeroize(material)
 	d.reseedCounter = 1
 	d.reseeds++
-	d.bufN = 0 // descarta salida pre-generada bajo el estado anterior
+	// Descarta la salida pre-generada bajo el estado anterior Y la borra de
+	// memoria: el buffer no debe retener draws pasados (refuerzo R4 — un
+	// volcado de memoria no debe revelar salida ya emitida o descartada).
+	d.bufN = 0
+	zeroize(d.buf[:])
 	return nil
 }
 
 // NextUint32 implementa Source. Ante un fallo de entropía en un reseed
-// automático hace panic: GLI-19 R11 exige detener el juego antes que
-// degradar la fuente (con CryptoEntropy sobre Go ≥1.24 es inalcanzable).
+// automático hace panic con rng.EntropyError: GLI-19 R11 exige detener el
+// juego antes que degradar la fuente. Las capas de aislamiento de pánicos
+// (scheduler) reconocen EntropyError y terminan el proceso en vez de
+// continuar sin RNG. (Con CryptoEntropy sobre Go ≥1.24 es inalcanzable.)
 func (d *HMACDRBG) NextUint32() uint32 {
 	if d.bufN < 4 {
 		if err := d.generate(); err != nil {
-			panic(fmt.Sprintf("rng: HMACDRBG generate: %v", err))
+			panic(EntropyError{Err: err})
 		}
 	}
 	off := drbgChunk - d.bufN
 	v := uint32(d.buf[off])<<24 | uint32(d.buf[off+1])<<16 |
 		uint32(d.buf[off+2])<<8 | uint32(d.buf[off+3])
+	// Borra los bytes consumidos: el buffer no retiene salida ya emitida
+	// (refuerzo de backtracking resistance dentro de la ventana del chunk).
+	d.buf[off], d.buf[off+1], d.buf[off+2], d.buf[off+3] = 0, 0, 0, 0
 	d.bufN -= 4
 	d.gen++
 	return v
@@ -150,8 +171,11 @@ func (d *HMACDRBG) generateInto(dst []byte) error {
 		}
 	}
 	// Pasos 3-4: temp = temp || (V = HMAC(K, V)) hasta cubrir la petición.
+	// Usa el mac pre-keyed (K constante durante todo el bucle).
 	for off := 0; off < len(dst); off += sha256.Size {
-		d.v = hmacSum(d.key[:], d.v[:])
+		d.mac.Reset()
+		d.mac.Write(d.v[:])
+		d.mac.Sum(d.v[:0])
 		copy(dst[off:], d.v[:])
 	}
 	// Paso 6: HMAC_DRBG_Update(additional_input=null) — se ejecuta SIEMPRE.
@@ -161,17 +185,25 @@ func (d *HMACDRBG) generateInto(dst []byte) error {
 	return nil
 }
 
-// update es HMAC_DRBG_Update (§10.1.2.2).
+// update es HMAC_DRBG_Update (§10.1.2.2). Reconstruye el mac pre-keyed al
+// final porque K cambia.
 func (d *HMACDRBG) update(providedData []byte) {
 	// K = HMAC(K, V || 0x00 || provided_data); V = HMAC(K, V).
 	d.key = hmacSum(d.key[:], d.v[:], []byte{0x00}, providedData)
 	d.v = hmacSum(d.key[:], d.v[:])
-	if len(providedData) == 0 {
-		return
+	if len(providedData) > 0 {
+		// K = HMAC(K, V || 0x01 || provided_data); V = HMAC(K, V).
+		d.key = hmacSum(d.key[:], d.v[:], []byte{0x01}, providedData)
+		d.v = hmacSum(d.key[:], d.v[:])
 	}
-	// K = HMAC(K, V || 0x01 || provided_data); V = HMAC(K, V).
-	d.key = hmacSum(d.key[:], d.v[:], []byte{0x01}, providedData)
-	d.v = hmacSum(d.key[:], d.v[:])
+	d.mac = hmac.New(sha256.New, d.key[:])
+}
+
+// zeroize borra material sensible (semillas, salida descartada).
+func zeroize(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
 }
 
 // hmacSum calcula HMAC-SHA256(key, concat(parts...)).

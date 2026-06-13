@@ -113,67 +113,14 @@ type gameTypeRunner struct {
 	retryCount int
 }
 
-// nameCooldown is a FIFO ring tracking the most recent N competitor
-// names emitted across rounds. Membership is O(1) via the set; eviction
-// is O(1) by popping the oldest entry off the queue when capacity is
-// exceeded. Capacity equals NumberCompetitor*10 — matching the legacy
-// TS generator's 10-slot anti-repetition window (see
-// virteon-platform/apps/backend/src/engine/datasource/GeneratorDataSource.ts:178-217).
-//
-// Replaces the previous wholesale-wipe strategy (deleted recentNames
-// on threshold) with proper FIFO eviction: newly-eligible names cycle
-// in one at a time instead of all-at-once, eliminating the post-wipe
-// collision risk on the very next round.
-type nameCooldown struct {
-	set      map[string]struct{}
-	queue    []string
-	capacity int
-}
+// nameCooldown moved to internal/racegen/generators (NameCooldown) so the
+// GLI extraction harness replicates the exact production draw sequence.
+// Thin aliases keep this binary's call sites and tests unchanged.
+type nameCooldown = generators.NameCooldown
 
-// newNameCooldown returns an empty cooldown ring sized for cap entries.
-// cap must be > 0; the caller is expected to derive it from
-// cfg.NumberCompetitor*10.
-func newNameCooldown(cap int) *nameCooldown {
-	if cap <= 0 {
-		cap = 1
-	}
-	return &nameCooldown{
-		set:      make(map[string]struct{}, cap),
-		queue:    make([]string, 0, cap),
-		capacity: cap,
-	}
+func newNameCooldown(capacity int) *nameCooldown {
+	return generators.NewNameCooldown(capacity)
 }
-
-// Add pushes name onto the FIFO. If the ring is at capacity, evicts the
-// oldest entry first. No-op if name is already present (preserves its
-// original insertion order — this matches the legacy "the same name
-// stays cool for 10 rounds from its first sighting" semantics).
-func (c *nameCooldown) Add(name string) {
-	if _, exists := c.set[name]; exists {
-		return
-	}
-	if len(c.queue) >= c.capacity {
-		oldest := c.queue[0]
-		c.queue = c.queue[1:]
-		delete(c.set, oldest)
-	}
-	c.queue = append(c.queue, name)
-	c.set[name] = struct{}{}
-}
-
-// Excludes returns the set-as-map[string]bool expected by
-// generators.GenerateCompetitors. Allocates fresh each call so the
-// generator cannot mutate the cooldown's internal state.
-func (c *nameCooldown) Excludes() map[string]bool {
-	out := make(map[string]bool, len(c.set))
-	for n := range c.set {
-		out[n] = true
-	}
-	return out
-}
-
-// Len returns the current number of names in the cooldown.
-func (c *nameCooldown) Len() int { return len(c.queue) }
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.LUTC)
@@ -434,9 +381,18 @@ func tickHorizon(runners []*gameTypeRunner, mt rng.Source, aud *audit.Log, now t
 // crash on the next tick. The audit log already has the partial state
 // up to the panic point (e.g. game_generated emitted, panic during
 // persist) — that's preserved for postmortem.
+//
+// EXCEPTION — rng.EntropyError is NOT recovered: an entropy failure means
+// the game must STOP (GLI-19 R11 fail-safe). Swallowing it here would keep
+// the scheduler "healthy" while silently producing no rounds — the inverse
+// of fail-closed. We terminate the process instead.
 func tickRunner(r *gameTypeRunner, slot time.Time, mt rng.Source, aud *audit.Log) {
 	defer func() {
 		if rec := recover(); rec != nil {
+			if ee, ok := rec.(rng.EntropyError); ok {
+				log.Fatalf("race-generator: FATAL entropy failure (GLI-19 R11 fail-closed) %s slot=%s: %v",
+					r.cfg.GameType, slot.UTC().Format(time.RFC3339), ee)
+			}
 			log.Printf("race-generator: PANIC %s slot=%s: %v\n%s",
 				r.cfg.GameType, slot.UTC().Format(time.RFC3339),
 				rec, debug.Stack())
@@ -620,33 +576,35 @@ func generateAndPersist(
 		return fmt.Errorf("generate: %w", err)
 	}
 
-	// 2. GLI-19 §3.2.6 background cycling AFTER this round, preparing
-	// the source state for the NEXT round. Emit audit ONLY on success — we
+	// 2. Round transition AFTER this round (GLI-19 §3.2.6 background cycling
+	// + DRBG reseed) via the SHARED helper rng.BetweenRounds — the same
+	// sequence the GLI extraction harness executes, so "same RNG and
+	// methods" is structural, not aspirational. Production always passes a
+	// Reseeder (makeSource returns rng.CertifiedStream — compile-time
+	// guarantee); only tests inject plain Sources, in which case the reseed
+	// step and its audit field are omitted. Emit audit ONLY on success — we
 	// never want a state_mod entry that doesn't correspond to a real
 	// round-to-round transition.
-	sm, err := rng.ModifyStateBetweenGames(mt, gameID)
+	rs, _ := mt.(rng.Reseeder)
+	sm, err := rng.BetweenRounds(mt, rs, gameID)
 	if err != nil {
-		return fmt.Errorf("state modifier: %w", err)
+		return fmt.Errorf("round transition: %w", err)
 	}
-	// 2.b Round-boundary reseed (sources that support it — the production
-	// HMAC-DRBG): real prediction resistance between rounds. In gli_lab
-	// builds the entropy expander is deterministic, so replay still holds.
-	reseeds := uint64(0)
-	if rs, ok := mt.(rng.Reseeder); ok {
-		if err := rs.Reseed([]byte(gameID)); err != nil {
-			return fmt.Errorf("round reseed: %w", err)
-		}
-		reseeds = rs.ReseedCount()
+	// genBefore/genAfter make the FULL stream consumption reconcilable from
+	// the audit log: game_generated.mtSeqAfter → state_mod.genBefore covers
+	// the discard-count extraction draw(s); genBefore→genAfter is the
+	// discard itself. No unexplained draws between consecutive rounds.
+	payload := map[string]any{
+		"gameId":    sm.GameID,
+		"reason":    sm.Reason,
+		"discard":   sm.DiscardCount,
+		"genBefore": sm.GenBefore,
+		"genAfter":  sm.GenAfter,
 	}
-	if err := aud.Append(audit.Entry{
-		Kind: "state_mod",
-		Payload: map[string]any{
-			"gameId":  sm.GameID,
-			"reason":  sm.Reason,
-			"discard": sm.DiscardCount,
-			"reseeds": reseeds,
-		},
-	}); err != nil {
+	if rs != nil {
+		payload["reseeds"] = rs.ReseedCount()
+	}
+	if err := aud.Append(audit.Entry{Kind: "state_mod", Payload: payload}); err != nil {
 		return fmt.Errorf("audit state_mod: %w", err)
 	}
 
@@ -685,10 +643,9 @@ func generateAndPersist(
 	return nil
 }
 
-// rngPersonalization is the SP 800-90A personalization string for the
-// shared DRBG instance (see source_prod.go / source_lab.go). Not secret —
-// it identifies the consuming application in the instantiate seed material.
-const rngPersonalization = "vg-racegen/race-generator/v1"
+// The SP 800-90A personalization string lives single-sourced in the rng
+// package (rng.PersonalizationV1) so this binary and the GLI extraction
+// harness cannot drift apart.
 
 // loadEnv reads and validates the binary's environment variables. All
 // defaults live here (single source of truth — see the header comment).

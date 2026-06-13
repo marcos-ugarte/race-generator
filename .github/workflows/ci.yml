@@ -46,8 +46,16 @@ jobs:
 
       # GLI-19 evidence-of-absence gate: production binaries must contain
       # neither the MT19937 test scaffolding nor the gli_lab entropy expander.
+      # POSITIVE CONTROL first: the gli_lab build MUST contain LabEntropy —
+      # this proves the symbol grep still matches reality (a rename of the
+      # lab types would otherwise make the absence check vacuously green).
       - name: Verify prod binaries exclude lab RNG paths
         run: |
+          go build -trimpath -tags gli_lab -o /tmp/racegen-lab ./cmd/race-generator
+          if ! go tool nm /tmp/racegen-lab | grep -qi 'LabEntropy'; then
+            echo "::error::positive control failed: gli_lab binary lacks LabEntropy symbols — the absence gate below is no longer testing anything"
+            exit 1
+          fi
           for cmd in race-generator rngextract; do
             go build -trimpath -o /tmp/$cmd-prod ./cmd/$cmd
             if go tool nm /tmp/$cmd-prod | grep -qi 'mt19937\|LabEntropy'; then

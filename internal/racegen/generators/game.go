@@ -283,7 +283,7 @@ func GenerateGame(
 			"videoStart":   g.VideoStartDt.Format(time.RFC3339Nano),
 			"finishFirst":  g.Finish.First,
 			"finishSecond": g.Finish.Second,
-			"videoID":      extractVideoID(g.Finish.VideoName.MP4),
+			"videoID":      ExtractVideoID(g.Finish.VideoName.MP4),
 			"bonus":        g.Bonus,
 			"oddsHash":     hashShortFloats(g.Odds),
 			"compsHash":    hashShortCompetitors(g.Competitors),
@@ -306,11 +306,11 @@ func hashRoundID(roundCode string) string {
 	return hex.EncodeToString(sum[:])[:16]
 }
 
-// extractVideoID parses the trailing R\d+ token from a video URL (e.g.
+// ExtractVideoID parses the trailing R\d+ token from a video URL (e.g.
 // "/.local/dog8/R0241_h.mp4" -> "R0241"). If the URL doesn't match the
 // expected shape, returns the URL unchanged — the audit log keeps the
 // raw value for forensics.
-func extractVideoID(mp4URL string) string {
+func ExtractVideoID(mp4URL string) string {
 	// Find the last '/' and take everything after, up to the first '_' or '.'.
 	slash := -1
 	for i := len(mp4URL) - 1; i >= 0; i-- {

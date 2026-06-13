@@ -44,7 +44,7 @@ flowchart LR
 | nonce | 16 bytes del CSPRNG del SO | §8.6.7 (≥ strength/2) |
 | personalization_string | `"vg-racegen/race-generator/v1"` | §8.7.1 (no secreta) |
 | Reseed automático | cada 10 000 peticiones de generación | ≪ límite 2^48 del estándar |
-| Reseed explícito | en cada frontera de ronda, con `additional_input` = roundCode | §10.1.2.4 |
+| Reseed explícito | en cada frontera de ronda, sin `additional_input` (la frescura la aporta la EntropySource; un identificador de ronda contendría datos de reloj y haría el stream de laboratorio función del instante de arranque en vez de la semilla) | §10.1.2.4 |
 | Bytes por petición interna | 1 024 (`drbgChunk`) | ≪ límite 2^19 bits/petición |
 | additional_input en Generate | no se usa (la actualización post-generación §10.1.2.5 paso 6 se ejecuta igualmente) | |
 
@@ -108,11 +108,17 @@ reordenación ni descarte selectivo (GLI-19: no cherry-picking).
 
 ### Ciclo entre rondas
 
-Tras cada ronda: (a) `ModifyStateBetweenGames` descarta 1–100 valores (conteo
-extraído del propio stream con `CertifiedInt`); (b) **reseed explícito del DRBG**
-con entropía fresca del SO y el roundCode como `additional_input`. El reseed aporta
-prediction resistance real entre rondas; el descarte se mantiene como defensa en
-profundidad y continuidad del diseño auditado.
+Tras cada ronda, la transición certificada `rng.BetweenRounds` — **el mismo
+helper compartido** por el binario de producción y la herramienta de extracción,
+de modo que "same RNG and methods" es estructural: (a) descarte de 1–100 valores
+(conteo extraído del propio stream con `CertifiedInt`); (b) **reseed explícito
+del DRBG** con entropía fresca de la EntropySource, sin `additional_input`. El
+reseed aporta prediction resistance real entre rondas; el descarte se mantiene
+como defensa en profundidad. La entrada de auditoría `state_mod` registra
+`discard`, `genBefore` y `genAfter`, de modo que el consumo del stream entre dos
+rondas consecutivas es **íntegramente reconciliable** desde el audit log
+(`game_generated.mtSeqAfter → genBefore` cubre la extracción del conteo;
+`genBefore → genAfter` es el descarte): no existen draws sin explicar.
 
 ## 5. Política de seeding y modo laboratorio
 
@@ -120,9 +126,16 @@ profundidad y continuidad del diseño auditado.
 |---|---|---|
 | EntropySource | `crypto/rand` (SO) | expansor determinista HKDF-SHA256 de una semilla de 32 bytes |
 | `RACEGEN_SEED_HEX` / `-seed` | **rechazado — el binario aborta** | **obligatorio** |
-| Reproducibilidad | ninguna (por diseño) | bit a bit, función exclusiva de la semilla |
+| Reproducibilidad | ninguna (por diseño) | secuencia de draws bit a bit, función exclusiva de la semilla¹ |
 | DRBG y disparadores de reseed | idénticos | idénticos |
 | Símbolos MT19937 / LabEntropy en el binario | **ninguno** (gate de CI con `go tool nm`) | LabEntropy presente |
+
+¹ Alcance del replay en el binario scheduler: la **secuencia de draws** es
+función exclusiva de la semilla (ningún disparador de reseed ni input del DRBG
+depende del reloj). La **identidad de las rondas** (roundCode, slots) sigue
+anclada al instante de arranque del scheduler; para evidencia con identidad
+también reproducible se usa `cmd/rngextract -mode game`, que fija el slot
+inicial — es la herramienta de recolección oficial de la sumisión.
 
 La única diferencia entre builds es la implementación de `EntropySource`; el DRBG,
 el escalado y todo el pipeline de juego son el mismo código ("same RNG and

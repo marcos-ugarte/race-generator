@@ -54,7 +54,7 @@ func CertifiedShuffle[T any](src Source, arr []T) {
 }
 
 // CertifiedNormal: Box-Muller — devuelve sólo z0 por llamada (z1 se descarta).
-// Consume dos uint32 del Source por invocación.
+// Consume dos CertifiedFloat = CUATRO uint32 del Source por invocación.
 func CertifiedNormal(src Source, mean, std float64) float64 {
 	u1 := CertifiedFloat(src)
 	if u1 == 0 {

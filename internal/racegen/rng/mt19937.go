@@ -14,7 +14,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 )
 
@@ -93,11 +92,6 @@ func (mt *MT19937) NextUint32() uint32 {
 	return y
 }
 
-// NextFloat emite un float64 uniforme en [0, 1).
-func (mt *MT19937) NextFloat() float64 {
-	return float64(mt.NextUint32()) / 4294967296.0
-}
-
 // Advance descarta n valores (GLI-19 §3.2.6 background cycling).
 func (mt *MT19937) Advance(n int) {
 	for i := 0; i < n; i++ {
@@ -108,30 +102,11 @@ func (mt *MT19937) Advance(n int) {
 // GenerationCount devuelve cuántos uint32 se han emitido desde el seed.
 func (mt *MT19937) GenerationCount() uint64 { return mt.gen }
 
-// State retorna una copia del estado para snapshot/reproducibilidad.
-type State struct {
-	S   [mtN]uint32 `json:"s"`
-	Idx int         `json:"idx"`
-	Gen uint64      `json:"gen"`
-}
-
-// State devuelve una copia del estado interno (independiente del MT19937).
-func (mt *MT19937) State() State {
-	return State{S: mt.state, Idx: mt.index, Gen: mt.gen}
-}
-
-var errStateInvalid = errors.New("estado MT19937 inválido")
-
-// RestoreState pone el RNG en un estado previo.
-func (mt *MT19937) RestoreState(s State) error {
-	if s.Idx < 0 || s.Idx > mtN {
-		return errStateInvalid
-	}
-	mt.state = s.S
-	mt.index = s.Idx
-	mt.gen = s.Gen
-	return nil
-}
+// NOTA: los snapshots de estado (State/RestoreState) y NextFloat se
+// eliminaron de la API del paquete — exponer el estado interno era
+// exactamente el hazard R4 que esta rama elimina, y ya no tenían ningún
+// consumidor de producción. Los tests que los necesitan los definen en
+// mt19937_testonly_test.go (jamás se compilan en un binario).
 
 // twist regenera los 624 uint32 internos.
 func (mt *MT19937) twist() {

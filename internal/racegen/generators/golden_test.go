@@ -89,11 +89,14 @@ import (
 // per float — finding H6 of docs/AUDITORIA-RNG-GLI19.md; eliminates the
 // 2^-32 quantization of IPF/Plackett-Luce probabilities). Unlike prior
 // rebaselines this changes EVERY float draw including the video selection,
-// so finish/first/second/video move too. This is the single planned
-// stream-consumption rebaseline of the GLI-19 certification branch
-// (docs/PLAN-CERTIFICACION-GLI19.md D3): the HMAC-DRBG source swap itself
-// does NOT alter this test (it pins the MT19937 lab path), and no further
-// remaps are expected before the code freeze.
+// so finish/first/second/video move too. The HMAC-DRBG source swap itself
+// does NOT alter this test (it pins the MT19937 lab path). ONE candidate
+// remap remains open before code freeze: plan D4 (inverse-CDF truncated
+// normal replacing Box-Muller+clamp, docs/PLAN-CERTIFICACION-GLI19.md) —
+// if adopted it MUST land before any Phase-5 evidence collection, since it
+// changes per-draw stream consumption and would force both a rebaseline
+// here and regeneration of collected evidence. Decide D4 first; collect
+// evidence second.
 func TestGoldenRoundFromSeedHex(t *testing.T) {
 	cases := []struct {
 		gt        string
@@ -155,7 +158,7 @@ func TestGoldenRoundFromSeedHex(t *testing.T) {
 			if g.Finish.Second != c.second {
 				t.Errorf("Finish.Second = %d, want %d", g.Finish.Second, c.second)
 			}
-			if vid := extractVideoID(g.Finish.VideoName.MP4); vid != c.videoID {
+			if vid := ExtractVideoID(g.Finish.VideoName.MP4); vid != c.videoID {
 				t.Errorf("videoID = %q, want %q (outcome draw changed)", vid, c.videoID)
 			}
 			if g.Bonus != c.bonus {

@@ -40,6 +40,8 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+	"strconv"
+	"strings"
 	"time"
 
 	"vg-racegen/internal/racegen/config"
@@ -105,10 +107,12 @@ func main() {
 	logMeta("done draws=%d end=%s", src.GenerationCount(), time.Now().UTC().Format(time.RFC3339))
 }
 
-// runBits es la Raw Output Collection Tool: n bytes de salida cruda del
-// Source en binario. Cada uint32 va big-endian — el mismo orden de bytes en
-// que el DRBG produce su key-stream, de modo que el archivo ES el stream
-// crudo pre-escalado.
+// runBits es la Raw Output Collection Tool: EXACTAMENTE n bytes de salida
+// cruda del Source en binario. Cada uint32 va big-endian — el mismo orden de
+// bytes en que el DRBG produce su key-stream, de modo que el archivo ES el
+// stream crudo pre-escalado. Si n no es múltiplo de 4, el último word se
+// trunca a los bytes pedidos (el tamaño del archivo siempre coincide con la
+// metadata de la corrida).
 func runBits(w *bufio.Writer, src rng.Source, n int64) error {
 	var buf [4]byte
 	for written := int64(0); written < n; written += 4 {
@@ -117,7 +121,11 @@ func runBits(w *bufio.Writer, src rng.Source, n int64) error {
 		buf[1] = byte(v >> 16)
 		buf[2] = byte(v >> 8)
 		buf[3] = byte(v)
-		if _, err := w.Write(buf[:]); err != nil {
+		chunk := buf[:]
+		if rem := n - written; rem < 4 {
+			chunk = buf[:rem]
+		}
+		if _, err := w.Write(chunk); err != nil {
 			return err
 		}
 		if written > 0 && written%(256<<20) == 0 {
@@ -131,10 +139,13 @@ func runBits(w *bufio.Writer, src rng.Source, n int64) error {
 // el pipeline de producción. CSV: una fila por ronda con el resultado final
 // (orden de llegada completo), el vídeo elegido, bonus y cuotas WIN.
 //
-// Replica la secuencia por ronda de cmd/race-generator (generateAndPersist):
-// GenerateGame → ModifyStateBetweenGames → Reseed de frontera de ronda. Los
-// slots avanzan por la rejilla real del gameType para que la identidad de
-// ronda sea la de producción.
+// Replica EXACTAMENTE la secuencia por ronda de cmd/race-generator
+// (generateAndPersist): GenerateGame con el MISMO cooldown de nombres de
+// producción (generators.NameCooldown, capacidad N*10) → transición
+// compartida rng.BetweenRounds (background cycling + reseed). Los slots
+// avanzan por la rejilla real del gameType; el slot inicial es fijo (no
+// time.Now()) para que el CSV sea reproducible en lab — los draws no
+// dependen del slot.
 func runGame(w *bufio.Writer, src rng.Source, gameType string, count int64) error {
 	cfg, err := config.Get(gameType)
 	if err != nil {
@@ -149,9 +160,9 @@ func runGame(w *bufio.Writer, src rng.Source, gameType string, count int64) erro
 		return err
 	}
 	jp := &generators.JackpotState{Current: generators.JackpotInitialValue}
+	recentNames := generators.NewNameCooldown(cfg.NumberCompetitor * 10)
+	rs, _ := src.(rng.Reseeder)
 
-	// Slot inicial fijo (no time.Now()): la identidad de ronda es metadata;
-	// los draws no dependen del slot. Fijo ⇒ el CSV es reproducible en lab.
 	slot := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 	step := time.Duration(cfg.RoundIntervalSec) * time.Second
 
@@ -159,25 +170,22 @@ func runGame(w *bufio.Writer, src rng.Source, gameType string, count int64) erro
 		return err
 	}
 	for i := int64(0); i < count; i++ {
-		g, err := generators.GenerateGame(src, cfg, sel, jp, slot, nil, nil)
+		g, err := generators.GenerateGame(src, cfg, sel, jp, slot, recentNames.Excludes(), nil)
 		if err != nil {
 			return fmt.Errorf("round %d: %w", i, err)
 		}
-		if _, err := rng.ModifyStateBetweenGames(src, g.RoundCode); err != nil {
-			return fmt.Errorf("round %d state mod: %w", i, err)
+		if _, err := rng.BetweenRounds(src, rs, g.RoundCode); err != nil {
+			return fmt.Errorf("round %d transition: %w", i, err)
 		}
-		if rs, ok := src.(rng.Reseeder); ok {
-			if err := rs.Reseed([]byte(g.RoundCode)); err != nil {
-				return fmt.Errorf("round %d reseed: %w", i, err)
-			}
+		for _, c := range g.Competitors {
+			recentNames.Add(c.Name)
 		}
 
-		order := g.Finish.Order()
 		if _, err := fmt.Fprintf(w, "%d,%s,%s,%d,%d,%s,%d,%s\n",
-			i, g.RoundCode, extractVideoID(g.Finish.VideoName.MP4),
+			i, g.RoundCode, generators.ExtractVideoID(g.Finish.VideoName.MP4),
 			g.Finish.First, g.Finish.Second,
-			joinInts(order, "|"), g.Bonus,
-			joinFloats(g.Odds[:cfg.WinOddsCount], "|")); err != nil {
+			joinInts(g.Finish.Order()), g.Bonus,
+			joinFloats(g.Odds[:cfg.WinOddsCount])); err != nil {
 			return err
 		}
 		slot = slot.Add(step)
@@ -202,44 +210,20 @@ func runInt(w *bufio.Writer, src rng.Source, min, max int, count int64) error {
 	return nil
 }
 
-// extractVideoID saca el token R\d+ / stem del nombre de vídeo (espejo del
-// helper no exportado de generators; aquí basta el basename sin extensión).
-func extractVideoID(mp4 string) string {
-	base := mp4
-	for i := len(base) - 1; i >= 0; i-- {
-		if base[i] == '/' {
-			base = base[i+1:]
-			break
-		}
+func joinInts(xs []int) string {
+	parts := make([]string, len(xs))
+	for i, x := range xs {
+		parts[i] = strconv.Itoa(x)
 	}
-	for i := 0; i < len(base); i++ {
-		if base[i] == '.' {
-			return base[:i]
-		}
-	}
-	return base
+	return strings.Join(parts, "|")
 }
 
-func joinInts(xs []int, sep string) string {
-	out := ""
+func joinFloats(xs []float64) string {
+	parts := make([]string, len(xs))
 	for i, x := range xs {
-		if i > 0 {
-			out += sep
-		}
-		out += fmt.Sprintf("%d", x)
+		parts[i] = strconv.FormatFloat(x, 'g', -1, 64)
 	}
-	return out
-}
-
-func joinFloats(xs []float64, sep string) string {
-	out := ""
-	for i, x := range xs {
-		if i > 0 {
-			out += sep
-		}
-		out += fmt.Sprintf("%g", x)
-	}
-	return out
+	return strings.Join(parts, "|")
 }
 
 func buildVersion() string {
