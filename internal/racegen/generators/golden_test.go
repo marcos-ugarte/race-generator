@@ -97,6 +97,15 @@ import (
 // changes per-draw stream consumption and would force both a rebaseline
 // here and regeneration of collected evidence. Decide D4 first; collect
 // evidence second.
+//
+// RE-BASELINED 2026-06-13 (dog8 outcome surface): dog8 Target{First,Second}-
+// Place recalibrated to UNIFORM (12.5/box) after measuring 47,332 distinct
+// DS rounds in Elastic (DS plays flat: chi² vs uniform p=0.49/0.29; the
+// legacy 11.92-13.32 targets made GA detectably different from DS,
+// homogeneity p=1.7e-4). The IPF weights change, so the dog8 video/finish
+// draw remaps (second/video/odds move; first/names/bonus/jackpot happen to
+// be stable for this seed). dog6/horse untouched. No stream-consumption
+// change — draws per round are identical; only the cumulative weights moved.
 func TestGoldenRoundFromSeedHex(t *testing.T) {
 	cases := []struct {
 		gt        string
@@ -115,12 +124,12 @@ func TestGoldenRoundFromSeedHex(t *testing.T) {
 			roundCode: "GA541_105_202605170210",
 			idRace:    210,
 			first:     3,
-			second:    6,
-			videoID:   "R0172",
+			second:    1,
+			videoID:   "R0174",
 			bonus:     1,
 			jackpot:   "45005.11",
 			names:     []string{"Robbin", "Gonzo", "Utah", "Trent", "Clue", "Juwel", "Destiny", "Velvet"},
-			oddsJSON:  `[10.8,5.1,3.6,6.3,14.7,6.4,7.5,16.5,60.7,38.3,66.4,168.7,70.8,85,182.4,57.3,17.6,29.6,75.2,33.1,34.6,71.7,34.6,15.8,20.9,49,20,23.4,53.4,66.6,31.1,22.3,97.3,37.4,43,99.4,169.9,79.6,51.2,99.1,96.5,111.2,260.8,73.5,31.4,24.9,42.6,94.9,50,102.1,79.9,40.7,28.2,50.8,113.2,54.5,127.3,181.2,92.5,65.6,115.8,259.5,116.6,134.6]`,
+			oddsJSON:  `[6.4,14.7,3.6,5.1,10.8,7.5,6.3,16.5,99.5,21.7,30.4,70.4,47,40.6,103.4,107.9,56.3,77,176,123.5,93.5,232.4,20.5,45.4,16.9,36,23.5,19.6,53.4,31.2,70.9,17.7,56.7,34.6,28.6,78.6,72.7,165.7,36.9,57.9,81.6,67.3,188.2,52.2,108.6,29.8,41.3,83.5,50.3,122.4,38,94.3,22.6,33.1,66.8,51.5,102.2,107.4,266.5,65.6,93.8,190.6,136.6,113]`,
 		},
 		{
 			gt:        "dog6",

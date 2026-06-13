@@ -473,13 +473,20 @@ func dog8Config() GameTypeConfigExt {
 		IntervalCount:   2,
 
 		// IPF targets — percentages, sum ≈ 99.99
+		// NB: Target{First,Second}Place recalibrated 2026-06-13 to UNIFORM
+		// (12.5/box), mirroring the 2026-05-31 dog6 recalibration. Measured
+		// over 47,332 distinct dog8 rounds in vgcontrol-collector-dog8-27bb:
+		// DS plays statistically flat — chi² vs uniform p=0.49 (1º), p=0.29
+		// (2º); per-box 1º ∈ [12.34, 12.75]. The previous targets (legacy
+		// virteon calibration, 11.92-13.32) made GA detectably different
+		// from DS (homogeneity chi² p=1.7e-4 over 100k GA vs 47k DS).
 		TargetFirstPlace: map[int]float64{
-			1: 12.96, 2: 13.00, 3: 11.92, 4: 12.26,
-			5: 11.99, 6: 13.32, 7: 12.62, 8: 11.92,
+			1: 12.5, 2: 12.5, 3: 12.5, 4: 12.5,
+			5: 12.5, 6: 12.5, 7: 12.5, 8: 12.5,
 		},
 		TargetSecondPlace: map[int]float64{
-			1: 12.52, 2: 12.09, 3: 12.58, 4: 12.71,
-			5: 12.56, 6: 12.64, 7: 13.15, 8: 11.75,
+			1: 12.5, 2: 12.5, 3: 12.5, 4: 12.5,
+			5: 12.5, 6: 12.5, 7: 12.5, 8: 12.5,
 		},
 
 		// IPF tuning — diverges from legacy virteon defaults (50/0.2)
@@ -829,13 +836,18 @@ func horseClassicConfig() GameTypeConfigExt {
 		GapExponent:      2.7,
 		IntervalCount:    2,
 
-		// IPF targets — UNIFORM (7 boxes). DS horse_classic plays ~uniform and
-		// we have no per-box DS table for 241. Sums to ≈100. IPF normalizes.
+		// IPF targets — 1º UNIFORM (DS plays flat: chi² vs uniform p=0.39
+		// over 14,804 distinct rounds in vgcontrol-collector-horse-classic,
+		// measured 2026-06-13). 2º recalibrated to the MEASURED DS marginal:
+		// DS second place is NOT flat (chi² vs uniform p=0.017; box 5 places
+		// second 15.29%) and the uniform target made GA detectably different
+		// (homogeneity p=0.006 over 100k GA vs 14.8k DS). NB: the 2º marginal
+		// rests on a 14.8k sample — re-measure when more capture accumulates.
 		TargetFirstPlace: map[int]float64{
 			1: 14.29, 2: 14.29, 3: 14.29, 4: 14.28, 5: 14.29, 6: 14.28, 7: 14.28,
 		},
 		TargetSecondPlace: map[int]float64{
-			1: 14.29, 2: 14.29, 3: 14.29, 4: 14.28, 5: 14.29, 6: 14.28, 7: 14.28,
+			1: 14.54, 2: 14.27, 3: 13.90, 4: 14.06, 5: 15.29, 6: 13.85, 7: 14.10,
 		},
 
 		// IPF tuning — legacy defaults (no DS CoV target for 241 to tune to).
@@ -867,10 +879,12 @@ func horseClassicConfig() GameTypeConfigExt {
 		PerformanceRange: Range{Min: 0.31, Max: 0.75},
 		NumberOfWinsMax:  5,
 
-		// Bonus — vendor template (web_ds_betoffers id 241: BonusNbr2x 17,
-		// BonusNbr3x 3). Use dog-parity empirical rates as placeholder.
-		Bonus2xProbability: 0.047,
-		Bonus3xProbability: 0.0086,
+		// Bonus — recalibrated 2026-06-13 against 14,977 distinct
+		// horse_classic rounds in vgcontrol-collector-horse-classic:
+		// DS plays 2x=4.61%, 3x=0.71% (the previous values were dog
+		// rates used as placeholder; horse's 3x is measurably lower).
+		Bonus2xProbability: 0.046,
+		Bonus3xProbability: 0.0071,
 
 		// Init / response (anchored to web_ds_betoffers id 241).
 		SkinVersion:  10,
