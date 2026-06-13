@@ -73,6 +73,17 @@ func cacheControlForState(state string) string {
 	return "public, max-age=5"
 }
 
+// cacheControlForFullState mirrors cacheControlForState for the full DTO's
+// "betting"/"running" states. Running rounds are immutable (the result is
+// revealed) → cache a little longer; betting rounds change as the window
+// approaches → short TTL.
+func cacheControlForFullState(state string) string {
+	if state == "running" {
+		return "public, max-age=30"
+	}
+	return "public, max-age=5"
+}
+
 // parseListLimit clamps ?limit to [1, maxListLimit], defaulting to
 // defaultListLimit. A supplied-but-malformed value returns an error so the
 // handler can emit 400.
@@ -124,13 +135,15 @@ func (h *handlers) handleCurrent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// /current returns the FULL (TV/POS mirror) DTO so a /tv consumer can
+	// reconstruct the gamepool. videoName/finish stay gated by VideoStartDt.
 	results := h.resultsFor(g.RoundCode)
-	dto, err := ToPublic(g, results, h.now())
+	dto, err := ToFull(g, results, h.now())
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
-	writeJSONOK(w, dto, cacheControlForState(dto.State))
+	writeJSONOK(w, dto, cacheControlForFullState(dto.State))
 }
 
 // handleDetail returns a single GA round by round code.
@@ -149,13 +162,15 @@ func (h *handlers) handleDetail(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusNotFound, map[string]any{"error": "round_not_found", "roundCode": roundCode})
 		return
 	}
+	// /detail returns the FULL (TV/POS mirror) DTO (same surface as
+	// /current); videoName/finish gated by VideoStartDt.
 	results := h.resultsFor(g.RoundCode)
-	dto, err := ToPublic(g, results, h.now())
+	dto, err := ToFull(g, results, h.now())
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
 		return
 	}
-	writeJSONOK(w, dto, cacheControlForState(dto.State))
+	writeJSONOK(w, dto, cacheControlForFullState(dto.State))
 }
 
 // handleUpcoming returns the next N open GA rounds for gameType. All

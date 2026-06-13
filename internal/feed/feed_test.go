@@ -132,12 +132,15 @@ func newTestServer(t *testing.T, reader Reader, auth AuthConfig, poller *Poller)
 
 var fixedNow = time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
 
-func TestHandleCurrent_ReturnsOpenRoundGated(t *testing.T) {
+// TestHandleCurrent_ReturnsFullRunningRound: /current now returns the FULL
+// (TV/POS mirror) DTO. The picked "current" round started 30s ago (video
+// still playing) ⇒ state="running" ⇒ videoName + finishOrder revealed.
+func TestHandleCurrent_ReturnsFullRunningRound(t *testing.T) {
 	fr := newFakeReader(func() time.Time { return fixedNow })
-	// One open round (current) + one already finished.
-	openG, openRes := dog8Round("50", fixedNow.Add(-30*time.Second), fixedNow.Add(30*time.Second))
+	// One in-progress round (current) + one already finished.
+	runG, runRes := dog8Round("50", fixedNow.Add(-30*time.Second), fixedNow.Add(30*time.Second))
 	finG, finRes := dog8Round("49", fixedNow.Add(-300*time.Second), fixedNow.Add(-240*time.Second))
-	fr.add(openG, openRes)
+	fr.add(runG, runRes)
 	fr.add(finG, finRes)
 
 	poller := NewPoller(fr, []string{"dog8"})
@@ -152,13 +155,52 @@ func TestHandleCurrent_ReturnsOpenRoundGated(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	var dto RacePublicDTO
+	var dto RaceFullDTO
 	json.NewDecoder(resp.Body).Decode(&dto)
-	if dto.State != "open" {
-		t.Fatalf("state = %q, want open (current = in-progress)", dto.State)
+	if dto.State != "running" {
+		t.Fatalf("state = %q, want running (current = in-progress, past VideoStartDt)", dto.State)
+	}
+	if dto.Betoffer != 541 {
+		t.Errorf("betoffer = %d, want 541", dto.Betoffer)
+	}
+	if dto.Odds == nil {
+		t.Errorf("odds missing from full DTO")
+	}
+	if len(dto.FinishOrder) == 0 {
+		t.Errorf("finishOrder missing on running current round")
+	}
+}
+
+// TestHandleCurrent_BettingRoundNoLeak: when the only round is still in its
+// betting window (VideoStartDt in the future), /current must NOT leak
+// videoName / finishOrder.
+func TestHandleCurrent_BettingRoundNoLeak(t *testing.T) {
+	fr := newFakeReader(func() time.Time { return fixedNow })
+	betG, betRes := dog8Round("60", fixedNow.Add(60*time.Second), fixedNow.Add(300*time.Second))
+	fr.add(betG, betRes)
+
+	poller := NewPoller(fr, []string{"dog8"})
+	srv := newTestServer(t, fr, AuthConfig{}, poller)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/races/current/dog8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var dto RaceFullDTO
+	json.NewDecoder(resp.Body).Decode(&dto)
+	if dto.State != "betting" {
+		t.Fatalf("state = %q, want betting", dto.State)
+	}
+	if dto.VideoName != nil {
+		t.Errorf("LEAK: videoName on betting current round: %s", dto.VideoName)
 	}
 	if dto.FinishOrder != nil {
-		t.Errorf("LEAK: finishOrder on open current round")
+		t.Errorf("LEAK: finishOrder on betting current round")
 	}
 }
 

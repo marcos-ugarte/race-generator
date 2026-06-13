@@ -55,3 +55,4 @@ ds-tools/__pycache__/
 
 # GLI evidence runs (large generated data — hashes recorded separately)
 evidencia/
+docker-compose.override.yml
