@@ -7,7 +7,27 @@
 
 ---
 
-## 1. Respuesta ejecutiva
+## 0. ADENDA 2026-06-13 — recalibración tras el estudio (estado actual)
+
+Tras el estudio se aplicó la rama `racegen/horse-odds-recal` y se reexaminó el tie-rate. **Estado vigente:**
+
+| Juego | Overround | Cuotas por rango | Tie-rate | Veredicto cuotas |
+|---|---|---|---|---|
+| dog8 | ✅ Δp50 +0.0006 | ✅ ≤4% | GA 25.8% vs DS-previa 26.7% (Δ0.9) / agregado 29.1% | **indistinguible** |
+| dog6 | ✅ Δp50 +0.0008 | ✅ central OK | GA 18.0% vs DS-previa 18.6% **y dedup ~18%** (Δ<1) / agregado 14.4% | **indistinguible** |
+| horse_classic | ✅ **1.1657 vs DS 1.1655** (era 1.1766) | ✅ **±1.7%**, favorito −1.6% (era −9%) | GA 19.6% (era 14.9%) vs agregado 25.8% | **overround+rango DS-matched**; tie/forecast pendientes |
+
+**Dos conclusiones que matizan el informe original:**
+
+1. **horse_classic RECALIBRADO** (commit en `racegen/horse-odds-recal`): el overround se bajó de 1.1765 (nominal 1/0.85) a **1.1655** (DS medido) y las medias de PositionConstraints se fijaron a la escalera DS por rango que el estudio extrajo. Resultado verificado en 100k: overround p50 = 1.1657 (DS 1.1655), medianas por rango dentro de ±1.7% (favorito −1.6%). Las cuotas WIN de horse ya **no** son placeholder en overround ni nivel por rango. Quedan sin ajustar el **forecast/exacta** (ForecastRank off, sin referencia DS) y la estructura de **empates** → el gate de cuotas del 241 sigue cerrado hasta cerrar esos dos.
+
+2. **El tie-rate de dog8/dog6 NO se recalibró, a propósito.** El "Δ −3.3/+3.6 pp" del informe venía del **agregado sin dedup**, que para dog6 (14.4%) **contradice** tanto la calibración previa (18.6%) como el dedup del propio workflow (~18%) — dos fuentes independientes que coinciden con GA (18.0%). El agregado mezcla estados del gamepool (history/settled) y está sesgado; recalibrar contra él degradaría una calibración correcta. **Por las fuentes fiables, dog8 y dog6 ya son indistinguibles en tie-rate** (Δ<1 pp). Confirmación definitiva pendiente de una medición **dedup-por-gameId a escala**, bloqueada por la desconexión del MCP de Elastic.
+
+**Resumen vigente:** multiplicadores indistinguibles los 3; cuotas indistinguibles en **dog8 y dog6** (todas las métricas, por referencias fiables); horse con overround y nivel por rango ya DS-matched, pendiente forecast+tie. El único trabajo de cuotas que queda es horse (forecast/tie) y una re-medición dedup limpia de confirmación cuando vuelva Elastic.
+
+---
+
+## 1. Respuesta ejecutiva (del estudio original — ver §0 para el estado tras recalibrar)
 
 | Juego | Cuotas (odds) | Multiplicadores (bonus) |
 |---|---|---|

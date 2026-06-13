@@ -742,30 +742,27 @@ func dog6Config() GameTypeConfigExt {
 // CALIBRATION STATUS — SMOKE-LEVEL (NOT DS-stat-calibrated, NOT live-money).
 // The finish POOL is real DS data (data/videoResults-horse_classic.json,
 // 8,256 captured 241 rounds — see data/embed.go SOURCE AUDIT), so the WINNER /
-// finish-order distribution tracks the vendor. The ODDS calibration, however,
-// is intentionally CONSERVATIVE and structurally minimal:
-//   - PositionConstraints / Targets use UNIFORM per-box values (7 boxes ≈
-//     14.286 each) — DS horse_classic plays ~uniform (doc 08), and we have no
-//     per-sorted-rank WIN-odds marginals for betoffer 241 in Elastic yet (doc
-//     08 lists horse_classic only as a "mixed field", no per-box odds table).
-//   - RankGap and ForecastRank are DISABLED (no DS tie-rate / exacta-tilt
-//     reference for 241). The odds path falls back to the per-position HEAD +
-//     flat CombinedFactor — the byte-identical legacy behaviour, same as a
-//     dog config with those models off.
-//   - OddsFinishCoupling uses the Mallows RIM (UsePL=false) with a modest
-//     Theta to give a mild favorite-win bias without claiming a calibrated PL
-//     weight vector we do not have.
+// finish-order distribution tracks the vendor. The ODDS calibration was
+// PARTIALLY DS-fitted on 2026-06-13 (docs/INFORME-CUOTAS-MULTIPLICADORES.md):
+//   - OVERROUND: now matches the DS-measured median 1.1655 (n=165k+650k),
+//     replacing the nominal 1/0.85=1.1765. GA p50 → 1.1657 (Δ +0.0002).
+//   - PER-RANK WIN-ODDS MEDIANS: PositionConstraints means set to the DS
+//     per-rank ladder (4.07/4.56/5.11/6.09/7.39/9.24/11.47). GA now tracks
+//     DS within ±1.7% per rank (favorite was −9%, now −1.6%).
+//   - STILL NOT DS-fitted: the within-matrix TIE-RATE (GA 19.6% vs a DS
+//     aggregate ~25.8%, but that DS figure shares the gamepool-lifecycle
+//     measurement caveat of the dog tie-rates — needs a clean dedup-by-gameId
+//     re-measurement to trust); FORECAST exacta tilt (ForecastRank DISABLED,
+//     flat CombinedFactor — no DS exacta reference for 241); the coupling is
+//     Mallows RIM (no PL weights for 241). RankGap stays DISABLED (the
+//     per-position HEAD path already hits the per-rank ladder).
 //
-// Per-sorted-rank marginals + RankGap/ForecastRank/PL calibration from Elastic
-// are a follow-up (camino "paridad real"); until then horse_classic odds are a
-// placeholder and the GLI gate MUST stay closed for betoffer 241 (the
-// certifiable surface is videoselector.Select() over the REAL pool, which is
-// preserved — but the odds VALUES are not vendor-matched). See the implementer
-// report / docs/racegen-design for the known-gap.
-//
-// PositionConstraints Mean values are a smooth favorite→longshot ramp purely
-// so the WIN-odds vector is well-ordered before the overround rescale; they are
-// NOT fitted to DS. The overround target derives from RTP 0.85 (1/0.85≈1.1765).
+// Remaining "paridad real" follow-up for betoffer 241: a clean DS tie-rate
+// (dedup) and an exacta-tilt reference, then enable/calibrate RankGap +
+// ForecastRank + PL and reverify. Until tie-rate + forecast are confirmed,
+// keep the GLI/production gate closed for 241 ODDS (the certifiable surface
+// — videoselector.Select() over the REAL pool — and the overround/per-rank
+// WIN level are DS-matched; the exacta tail and tie structure are not yet).
 func horseClassicConfig() GameTypeConfigExt {
 	return GameTypeConfigExt{
 		// Identity
@@ -782,26 +779,31 @@ func horseClassicConfig() GameTypeConfigExt {
 		NumberOdds:        49,
 		WinOddsCount:      7,
 		ForecastOddsCount: 42,
-		// RTP 0.85 (web_ds_betoffers id 241) ⇒ target overround = 1/0.85 ≈ 1.1765.
-		OverroundTarget:    1.1765,
+		// OverroundTarget recalibrated 2026-06-13: DS vendor median overround
+		// for betoffer 241 is 1.1655 (measured n=165k, reconfirmed n=650k,
+		// docs/INFORME-CUOTAS-MULTIPLICADORES.md), NOT the nominal 1/0.85 =
+		// 1.1765 the RTP implies — the real DS book runs slightly tighter.
+		OverroundTarget:    1.1655,
 		OverroundTolerance: 0.003,
-		// Modest per-race overround spread (placeholder; not DS-fitted for 241).
-		OverroundShift:    1.170,
-		OverroundLogSigma: 0.30,
-		// Modest symmetric shape concentration (placeholder).
-		ShapeConcentrationSigma: 0.20,
+		OverroundShift:     1.159,
+		OverroundLogSigma:  0.30,
+		// Lowered from 0.20: the per-race shape concentration κ compresses the
+		// favorite; 0.10 keeps the favorite from running too short vs DS.
+		ShapeConcentrationSigma: 0.10,
 		MaxOdds:                 17.5,
-		// Smooth favorite→longshot ramp for a 7-field. NOT DS-fitted — see the
-		// constructor doc. Std/Min/Max give the per-position HEAD path room to
-		// vary without crossing ranks; the overround rescale sets the level.
+		// PositionConstraint means recalibrated 2026-06-13 to the DS per-rank
+		// WIN-odds ladder for 241 (favorite→outsider medians, from the 100k
+		// study). The previous smooth ramp left the favorite ~9% short (3.70
+		// vs DS 4.07). Sum(1/mean) ≈ 1.156 ≈ DS overround, so the rescale is
+		// near-neutral and the per-rank medians track DS.
 		PositionConstraints: []PositionConstraint{
-			{Mean: 4.5, Std: 0.70, Min: 1.8, Max: 7.0},
-			{Mean: 5.3, Std: 0.60, Min: 4.0, Max: 9.0},
-			{Mean: 6.2, Std: 0.70, Min: 4.4, Max: 10.0},
-			{Mean: 7.4, Std: 0.90, Min: 5.0, Max: 12.0},
-			{Mean: 9.0, Std: 1.20, Min: 6.0, Max: 14.0},
-			{Mean: 11.2, Std: 1.60, Min: 7.0, Max: 17.0},
-			{Mean: 13.8, Std: 1.90, Min: 8.0, Max: 17.5},
+			{Mean: 4.07, Std: 0.70, Min: 2.0, Max: 7.0},
+			{Mean: 4.56, Std: 0.60, Min: 3.0, Max: 8.0},
+			{Mean: 5.11, Std: 0.70, Min: 3.5, Max: 9.0},
+			{Mean: 6.09, Std: 0.90, Min: 4.0, Max: 11.0},
+			{Mean: 7.39, Std: 1.20, Min: 5.0, Max: 13.0},
+			{Mean: 9.24, Std: 1.60, Min: 6.0, Max: 16.0},
+			{Mean: 11.47, Std: 1.90, Min: 7.0, Max: 17.5},
 		},
 		// Flat forecast combined factor (placeholder; ForecastRank disabled).
 		CombinedFactor: PositionConstraint{Mean: 1.0, Std: 0.0567, Min: 0.85, Max: 1.15},
