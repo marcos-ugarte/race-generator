@@ -83,6 +83,20 @@ import (
 // downstream jackpot. finish/first/second/video/bonus/names stay UNCHANGED (the
 // forecast draw is after the finish/video draw). The certifiable
 // video-selection/winner surface is untouched.
+//
+// RE-BASELINED 2026-06-12 (FULL remap — finish/video/names/odds/jackpot):
+// CertifiedFloat moved from 32-bit to 53-bit resolution (two uint32 draws
+// per float — finding H6 of docs/AUDITORIA-RNG-GLI19.md; eliminates the
+// 2^-32 quantization of IPF/Plackett-Luce probabilities). Unlike prior
+// rebaselines this changes EVERY float draw including the video selection,
+// so finish/first/second/video move too. The HMAC-DRBG source swap itself
+// does NOT alter this test (it pins the MT19937 lab path). ONE candidate
+// remap remains open before code freeze: plan D4 (inverse-CDF truncated
+// normal replacing Box-Muller+clamp, docs/PLAN-CERTIFICACION-GLI19.md) —
+// if adopted it MUST land before any Phase-5 evidence collection, since it
+// changes per-draw stream consumption and would force both a rebaseline
+// here and regeneration of collected evidence. Decide D4 first; collect
+// evidence second.
 func TestGoldenRoundFromSeedHex(t *testing.T) {
 	cases := []struct {
 		gt        string
@@ -100,25 +114,25 @@ func TestGoldenRoundFromSeedHex(t *testing.T) {
 			gt:        "dog8",
 			roundCode: "GA541_105_202605170210",
 			idRace:    210,
-			first:     2,
-			second:    8,
-			videoID:   "R0291",
+			first:     3,
+			second:    6,
+			videoID:   "R0172",
 			bonus:     1,
-			jackpot:   "45004.56",
-			names:     []string{"Donny", "Zora", "Quantum", "Nina", "Vitus", "Waldi", "Oscar", "Gecko"},
-			oddsJSON:  `[6.9,8,8,5.9,8.4,11.5,5.1,5.6,56.2,49.6,39.3,52.7,78,38.4,36.3,58.6,63.3,50.8,69.5,96,39.2,43.3,52.8,67.3,52.1,77.2,86,41.8,47.1,38.8,48.2,47.3,43.8,67.3,29.2,34.2,65.9,67.1,66.5,55.6,104.4,40,51.1,78.4,94.4,103.1,67.9,104.4,62.9,68.7,33.5,40.8,40,29.1,43.1,60.2,25.3,36.8,41.6,42.9,34.2,43,61.8,25.6]`,
+			jackpot:   "45005.11",
+			names:     []string{"Robbin", "Gonzo", "Utah", "Trent", "Clue", "Juwel", "Destiny", "Velvet"},
+			oddsJSON:  `[10.8,5.1,3.6,6.3,14.7,6.4,7.5,16.5,60.7,38.3,66.4,168.7,70.8,85,182.4,57.3,17.6,29.6,75.2,33.1,34.6,71.7,34.6,15.8,20.9,49,20,23.4,53.4,66.6,31.1,22.3,97.3,37.4,43,99.4,169.9,79.6,51.2,99.1,96.5,111.2,260.8,73.5,31.4,24.9,42.6,94.9,50,102.1,79.9,40.7,28.2,50.8,113.2,54.5,127.3,181.2,92.5,65.6,115.8,259.5,116.6,134.6]`,
 		},
 		{
 			gt:        "dog6",
 			roundCode: "GA141_101_202605170211",
 			idRace:    211,
-			first:     2,
-			second:    6,
-			videoID:   "R0489",
+			first:     6,
+			second:    4,
+			videoID:   "R0222",
 			bonus:     1,
-			jackpot:   "45004.83",
-			names:     []string{"Donny", "Zora", "Quantum", "Nina", "Vitus", "Waldi"},
-			oddsJSON:  `[4.4,4.9,7.2,3.7,5,8.3,18.7,29.9,13,19.5,33,20.2,32.1,15.5,19.5,35.7,31.8,38.5,28.2,37.1,59.7,15.1,17.6,23.9,15.9,26.4,20,21.1,34.2,18.3,36.3,36.8,38.8,61.2,30.2,44.8]`,
+			jackpot:   "45001.73",
+			names:     []string{"Robbin", "Gonzo", "Utah", "Trent", "Clue", "Juwel"},
+			oddsJSON:  `[6.9,7.9,4.3,5.8,3.7,4.7,54.2,26.9,40,26.7,32.1,52.8,36.3,42.7,30.7,39.8,26.1,32.5,20.8,14.8,19.8,41.7,46.6,24.3,19.9,26.8,25.1,23.6,14.4,18.7,14,30.8,36.9,18.6,27.6,16.8]`,
 		},
 	}
 
@@ -144,7 +158,7 @@ func TestGoldenRoundFromSeedHex(t *testing.T) {
 			if g.Finish.Second != c.second {
 				t.Errorf("Finish.Second = %d, want %d", g.Finish.Second, c.second)
 			}
-			if vid := extractVideoID(g.Finish.VideoName.MP4); vid != c.videoID {
+			if vid := ExtractVideoID(g.Finish.VideoName.MP4); vid != c.videoID {
 				t.Errorf("videoID = %q, want %q (outcome draw changed)", vid, c.videoID)
 			}
 			if g.Bonus != c.bonus {

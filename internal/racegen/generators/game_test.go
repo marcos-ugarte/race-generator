@@ -444,7 +444,7 @@ func splitJSONL(raw []byte) [][]byte {
 	return out
 }
 
-// Sanity: extractVideoID parses URLs correctly. Tiny unit on a tiny helper
+// Sanity: ExtractVideoID parses URLs correctly. Tiny unit on a tiny helper
 // — kept here so we don't expose it just for testing.
 func TestExtractVideoIDHelper(t *testing.T) {
 	cases := []struct{ in, want string }{
@@ -454,8 +454,8 @@ func TestExtractVideoIDHelper(t *testing.T) {
 		{"plain", "plain"},
 	}
 	for _, tc := range cases {
-		if got := extractVideoID(tc.in); got != tc.want {
-			t.Errorf("extractVideoID(%q)=%q, want %q", tc.in, got, tc.want)
+		if got := ExtractVideoID(tc.in); got != tc.want {
+			t.Errorf("ExtractVideoID(%q)=%q, want %q", tc.in, got, tc.want)
 		}
 	}
 }

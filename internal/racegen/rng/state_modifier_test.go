@@ -12,14 +12,51 @@ func TestStateModifierAdvancesRNG(t *testing.T) {
 	if mod.DiscardCount < 1 || mod.DiscardCount > 100 {
 		t.Fatalf("discard fuera de [1,100]: %d", mod.DiscardCount)
 	}
-	if got := mt.GenerationCount(); got != before+uint64(mod.DiscardCount) {
-		t.Fatalf("gen no avanzó lo esperado: %d → %d (discard=%d)", before, got, mod.DiscardCount)
+	// El descarte (GenAfter-GenBefore) es exactamente DiscardCount; la
+	// extracción del conteo (CertifiedInt sobre el stream) consume ≥1 draw
+	// adicional ANTES de GenBefore — determinista dada la semilla.
+	if got := mod.GenAfter - mod.GenBefore; got != uint64(mod.DiscardCount) {
+		t.Fatalf("descarte registrado: GenAfter-GenBefore=%d, want %d", got, mod.DiscardCount)
+	}
+	if mod.GenBefore <= before {
+		t.Fatal("la extracción del discard count debe consumir el stream certificado (GenBefore > before)")
+	}
+	if got := mt.GenerationCount(); got != mod.GenAfter {
+		t.Fatalf("GenerationCount=%d, want GenAfter=%d", got, mod.GenAfter)
 	}
 	if mod.GameID != "round-test-1" {
 		t.Fatalf("gameID no se preservó: %q", mod.GameID)
 	}
 	if mod.Reason != "between_games" {
 		t.Fatalf("reason inesperado: %q", mod.Reason)
+	}
+}
+
+// TestStateModifierDeterministic: con la misma semilla, dos fuentes producen
+// el MISMO discard count y la misma secuencia posterior — la propiedad que
+// hace el background cycling reproducible en el modo laboratorio (el diseño
+// anterior extraía el conteo de crypto/rand y rompía el replay).
+func TestStateModifierDeterministic(t *testing.T) {
+	seedHex := "00000000000000000000000000000000000000000000000000000000000000aa"
+	a, _ := NewMT19937WithSeedHex(seedHex)
+	b, _ := NewMT19937WithSeedHex(seedHex)
+	for i := 0; i < 5; i++ {
+		modA, err := ModifyStateBetweenGames(a, "round")
+		if err != nil {
+			t.Fatalf("ronda %d a: %v", i, err)
+		}
+		modB, err := ModifyStateBetweenGames(b, "round")
+		if err != nil {
+			t.Fatalf("ronda %d b: %v", i, err)
+		}
+		if modA.DiscardCount != modB.DiscardCount {
+			t.Fatalf("ronda %d: discard divergente %d vs %d", i, modA.DiscardCount, modB.DiscardCount)
+		}
+		for j := 0; j < 50; j++ {
+			if a.NextUint32() != b.NextUint32() {
+				t.Fatalf("ronda %d iter %d: secuencia divergente", i, j)
+			}
+		}
 	}
 }
 

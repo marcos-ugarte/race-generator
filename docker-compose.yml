@@ -30,16 +30,13 @@ services:
       # RACEGEN_TICK_MS: "1000"
       # RACEGEN_JACKPOT_INIT: "45000"
       #
-      # ── SEED (GLI) ─────────────────────────────────────────────────────
-      # APP_ENV unset/dev  → empty seed allowed (crypto/rand, NON-reproducible).
-      # APP_ENV=prod|staging|stg → RACEGEN_SEED_HEX is MANDATORY (the binary
-      #   fail-closes without it) so the audit log can be replayed for GLI-19.
-      #
-      # NEVER hardcode a real production seed in this file. Inject it at deploy
-      # time (e.g. `RACEGEN_SEED_HEX=$(...) docker compose up`, an .env file
-      # kept out of git, or a secrets manager).
+      # ── SEED (GLI-19) ──────────────────────────────────────────────────
+      # Production seeding is NON-deterministic by design: the binary
+      # instantiates an HMAC-DRBG (SP 800-90A) from the OS CSPRNG and ABORTS
+      # if RACEGEN_SEED_HEX is set. Deterministic seeding exists only in lab
+      # builds (`go build -tags gli_lab`), which are never deployed.
+      # Do NOT set RACEGEN_SEED_HEX here.
       # APP_ENV: prod
-      # RACEGEN_SEED_HEX: "<64-hex-char seed — inject, do not commit>"
     volumes:
       - racegen-data:/data
     # Healthcheck is inherited from the Dockerfile (WAL freshness). Override

@@ -11,9 +11,9 @@
 // Variables de entorno: ver bloque loadEnv() abajo.
 //   - DB_PATH                ruta a relay.db (default ./data/relay.db)
 //   - RACEGEN_GAMETYPES      coma-separados (default = config.SupportedGameTypes())
-//   - RACEGEN_SEED_HEX       64 hex; vacio => crypto/rand + warning (solo dev).
-//     REQUERIDO si APP_ENV in {prod,staging,stg} (GLI-19 §3.3)
-//   - APP_ENV                prod | staging | stg | dev (gatea el fail-closed del seed)
+//   - RACEGEN_SEED_HEX       64 hex. SOLO builds -tags gli_lab (replay del
+//     laboratorio); un build de produccion ABORTA si esta presente.
+//   - APP_ENV                prod | staging | stg | dev (informativo)
 //   - RACEGEN_AUDIT_PATH     default ./data/racegen-audit.jsonl
 //   - RACEGEN_JACKPOT_INIT   default = generators.JackpotInitialValue
 //   - RACEGEN_TICK_MS        frecuencia del scheduler (default 1000)
@@ -113,67 +113,14 @@ type gameTypeRunner struct {
 	retryCount int
 }
 
-// nameCooldown is a FIFO ring tracking the most recent N competitor
-// names emitted across rounds. Membership is O(1) via the set; eviction
-// is O(1) by popping the oldest entry off the queue when capacity is
-// exceeded. Capacity equals NumberCompetitor*10 — matching the legacy
-// TS generator's 10-slot anti-repetition window (see
-// virteon-platform/apps/backend/src/engine/datasource/GeneratorDataSource.ts:178-217).
-//
-// Replaces the previous wholesale-wipe strategy (deleted recentNames
-// on threshold) with proper FIFO eviction: newly-eligible names cycle
-// in one at a time instead of all-at-once, eliminating the post-wipe
-// collision risk on the very next round.
-type nameCooldown struct {
-	set      map[string]struct{}
-	queue    []string
-	capacity int
-}
+// nameCooldown moved to internal/racegen/generators (NameCooldown) so the
+// GLI extraction harness replicates the exact production draw sequence.
+// Thin aliases keep this binary's call sites and tests unchanged.
+type nameCooldown = generators.NameCooldown
 
-// newNameCooldown returns an empty cooldown ring sized for cap entries.
-// cap must be > 0; the caller is expected to derive it from
-// cfg.NumberCompetitor*10.
-func newNameCooldown(cap int) *nameCooldown {
-	if cap <= 0 {
-		cap = 1
-	}
-	return &nameCooldown{
-		set:      make(map[string]struct{}, cap),
-		queue:    make([]string, 0, cap),
-		capacity: cap,
-	}
+func newNameCooldown(capacity int) *nameCooldown {
+	return generators.NewNameCooldown(capacity)
 }
-
-// Add pushes name onto the FIFO. If the ring is at capacity, evicts the
-// oldest entry first. No-op if name is already present (preserves its
-// original insertion order — this matches the legacy "the same name
-// stays cool for 10 rounds from its first sighting" semantics).
-func (c *nameCooldown) Add(name string) {
-	if _, exists := c.set[name]; exists {
-		return
-	}
-	if len(c.queue) >= c.capacity {
-		oldest := c.queue[0]
-		c.queue = c.queue[1:]
-		delete(c.set, oldest)
-	}
-	c.queue = append(c.queue, name)
-	c.set[name] = struct{}{}
-}
-
-// Excludes returns the set-as-map[string]bool expected by
-// generators.GenerateCompetitors. Allocates fresh each call so the
-// generator cannot mutate the cooldown's internal state.
-func (c *nameCooldown) Excludes() map[string]bool {
-	out := make(map[string]bool, len(c.set))
-	for n := range c.set {
-		out[n] = true
-	}
-	return out
-}
-
-// Len returns the current number of names in the cooldown.
-func (c *nameCooldown) Len() int { return len(c.queue) }
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.LUTC)
@@ -203,22 +150,20 @@ func main() {
 	}
 	defer func() { _ = sqlite.Close() }()
 
-	// RNG — UN solo MT19937 compartido entre runners.
-	mt, seedHex, err := makeMT(env.seedHex)
+	// RNG — UNA sola fuente certificada compartida entre runners
+	// (HMAC-DRBG SHA-256 en producción; ver source_prod.go / source_lab.go).
+	mt, srcDesc, err := makeSource(env.seedHex)
 	if err != nil {
 		log.Fatalf("race-generator: rng init: %v", err)
 	}
 
-	// Audit `init` entry — registra seedHex efectivamente usado.
-	seedSource := "RACEGEN_SEED_HEX"
-	if env.seedHex == "" {
-		seedSource = "crypto/rand"
-	}
+	// Audit `init` entry. NUNCA registra material de semilla (GLI-19 R4/R5
+	// — hallazgo H3): el descriptor identifica la fuente y, en builds de
+	// laboratorio, un fingerprint SHA-256 de la semilla.
 	if err := aud.Append(audit.Entry{
 		Kind: "init",
 		Payload: map[string]any{
-			"seedHex":     seedHex,
-			"seedSource":  seedSource,
+			"rngSource":   srcDesc,
 			"dbPath":      env.dbPath,
 			"gameTypes":   env.gameTypes,
 			"tickMs":      env.tickMS,
@@ -327,7 +272,7 @@ func buildRunners(gameTypes []string, jackpotInit float64) ([]*gameTypeRunner, e
 //
 // SYNCHRONOUS by design: see main()'s "ready" log invariant in
 // 03-RACE-BROADCASTER.md (Riesgo #2 mitigation).
-func bootBulk(runners []*gameTypeRunner, mt *rng.MT19937, aud *audit.Log, now time.Time, n int) error {
+func bootBulk(runners []*gameTypeRunner, mt rng.Source, aud *audit.Log, now time.Time, n int) error {
 	for _, r := range runners {
 		for i := 0; i < n; i++ {
 			slot := r.scheduledSlot(now, i)
@@ -360,7 +305,7 @@ func bootBulk(runners []*gameTypeRunner, mt *rng.MT19937, aud *audit.Log, now ti
 // already-finished rounds (returns written=false), so a warm restart is a
 // no-op here. Does NOT touch r.lastSlot — that is the future-horizon edge,
 // owned by bootBulk/tickHorizon; the backfilled past slots are behind it.
-func bootBackfill(runners []*gameTypeRunner, mt *rng.MT19937, aud *audit.Log, now time.Time, pastCount int) error {
+func bootBackfill(runners []*gameTypeRunner, mt rng.Source, aud *audit.Log, now time.Time, pastCount int) error {
 	for _, r := range runners {
 		for k := -(pastCount + 1); k <= -1; k++ {
 			slot := r.scheduledSlot(now, k)
@@ -384,7 +329,7 @@ func bootBackfill(runners []*gameTypeRunner, mt *rng.MT19937, aud *audit.Log, no
 func runScheduler(
 	ctx context.Context,
 	runners []*gameTypeRunner,
-	mt *rng.MT19937,
+	mt rng.Source,
 	aud *audit.Log,
 	tick time.Duration,
 ) {
@@ -412,7 +357,7 @@ func runScheduler(
 // than intervalSec (default tick = 1s, interval = 240s), most ticks
 // are no-ops: only the tick that first crosses a new boundary advances
 // the horizon by one round.
-func tickHorizon(runners []*gameTypeRunner, mt *rng.MT19937, aud *audit.Log, now time.Time) {
+func tickHorizon(runners []*gameTypeRunner, mt rng.Source, aud *audit.Log, now time.Time) {
 	for _, r := range runners {
 		slot := r.scheduledSlot(now, bulkSize-1)
 		if !slot.After(r.lastSlot) {
@@ -436,9 +381,18 @@ func tickHorizon(runners []*gameTypeRunner, mt *rng.MT19937, aud *audit.Log, now
 // crash on the next tick. The audit log already has the partial state
 // up to the panic point (e.g. game_generated emitted, panic during
 // persist) — that's preserved for postmortem.
-func tickRunner(r *gameTypeRunner, slot time.Time, mt *rng.MT19937, aud *audit.Log) {
+//
+// EXCEPTION — rng.EntropyError is NOT recovered: an entropy failure means
+// the game must STOP (GLI-19 R11 fail-safe). Swallowing it here would keep
+// the scheduler "healthy" while silently producing no rounds — the inverse
+// of fail-closed. We terminate the process instead.
+func tickRunner(r *gameTypeRunner, slot time.Time, mt rng.Source, aud *audit.Log) {
 	defer func() {
 		if rec := recover(); rec != nil {
+			if ee, ok := rec.(rng.EntropyError); ok {
+				log.Fatalf("race-generator: FATAL entropy failure (GLI-19 R11 fail-closed) %s slot=%s: %v",
+					r.cfg.GameType, slot.UTC().Format(time.RFC3339), ee)
+			}
 			log.Printf("race-generator: PANIC %s slot=%s: %v\n%s",
 				r.cfg.GameType, slot.UTC().Format(time.RFC3339),
 				rec, debug.Stack())
@@ -610,7 +564,7 @@ func (r *gameTypeRunner) scheduledSlot(now time.Time, n int) time.Time {
 func generateAndPersist(
 	r *gameTypeRunner,
 	slot time.Time,
-	mt *rng.MT19937,
+	mt rng.Source,
 	aud *audit.Log,
 ) error {
 	gameID := fmt.Sprintf("%s-%s", r.cfg.GameType, slot.UTC().Format("20060102T150405Z"))
@@ -622,22 +576,35 @@ func generateAndPersist(
 		return fmt.Errorf("generate: %w", err)
 	}
 
-	// 2. GLI-19 §3.2.6 background cycling AFTER this round, preparing
-	// the MT state for the NEXT round. Emit audit ONLY on success — we
+	// 2. Round transition AFTER this round (GLI-19 §3.2.6 background cycling
+	// + DRBG reseed) via the SHARED helper rng.BetweenRounds — the same
+	// sequence the GLI extraction harness executes, so "same RNG and
+	// methods" is structural, not aspirational. Production always passes a
+	// Reseeder (makeSource returns rng.CertifiedStream — compile-time
+	// guarantee); only tests inject plain Sources, in which case the reseed
+	// step and its audit field are omitted. Emit audit ONLY on success — we
 	// never want a state_mod entry that doesn't correspond to a real
 	// round-to-round transition.
-	sm, err := rng.ModifyStateBetweenGames(mt, gameID)
+	rs, _ := mt.(rng.Reseeder)
+	sm, err := rng.BetweenRounds(mt, rs, gameID)
 	if err != nil {
-		return fmt.Errorf("state modifier: %w", err)
+		return fmt.Errorf("round transition: %w", err)
 	}
-	if err := aud.Append(audit.Entry{
-		Kind: "state_mod",
-		Payload: map[string]any{
-			"gameId":  sm.GameID,
-			"reason":  sm.Reason,
-			"discard": sm.DiscardCount,
-		},
-	}); err != nil {
+	// genBefore/genAfter make the FULL stream consumption reconcilable from
+	// the audit log: game_generated.mtSeqAfter → state_mod.genBefore covers
+	// the discard-count extraction draw(s); genBefore→genAfter is the
+	// discard itself. No unexplained draws between consecutive rounds.
+	payload := map[string]any{
+		"gameId":    sm.GameID,
+		"reason":    sm.Reason,
+		"discard":   sm.DiscardCount,
+		"genBefore": sm.GenBefore,
+		"genAfter":  sm.GenAfter,
+	}
+	if rs != nil {
+		payload["reseeds"] = rs.ReseedCount()
+	}
+	if err := aud.Append(audit.Entry{Kind: "state_mod", Payload: payload}); err != nil {
 		return fmt.Errorf("audit state_mod: %w", err)
 	}
 
@@ -676,29 +643,9 @@ func generateAndPersist(
 	return nil
 }
 
-// makeMT initializes the shared MT19937. If `seedHex` is empty, the
-// function pulls 32 bytes from crypto/rand and prints a stderr warning.
-// This empty-seed path only reaches here in dev: loadEnv fail-closes on
-// an empty seed when APP_ENV in {prod,staging,stg} so production runs are
-// always reproducible (audit-log replay — GLI-19 §3.3). Returns the
-// seedHex actually used so the audit `init` payload reflects reality.
-func makeMT(seedHex string) (*rng.MT19937, string, error) {
-	if seedHex == "" {
-		fmt.Fprintln(os.Stderr,
-			"race-generator: WARN — RACEGEN_SEED_HEX not set; sembrando con crypto/rand "+
-				"(audit log will record the generated seedHex, pero la corrida no es reproducible)")
-		mt, hex, err := rng.NewMT19937FromOSEntropy()
-		if err != nil {
-			return nil, "", fmt.Errorf("crypto/rand seed: %w", err)
-		}
-		return mt, hex, nil
-	}
-	mt, err := rng.NewMT19937WithSeedHex(seedHex)
-	if err != nil {
-		return nil, "", fmt.Errorf("RACEGEN_SEED_HEX: %w", err)
-	}
-	return mt, seedHex, nil
-}
+// The SP 800-90A personalization string lives single-sourced in the rng
+// package (rng.PersonalizationV1) so this binary and the GLI extraction
+// harness cannot drift apart.
 
 // loadEnv reads and validates the binary's environment variables. All
 // defaults live here (single source of truth — see the header comment).
@@ -782,17 +729,13 @@ func loadEnv() (envConfig, error) {
 		if _, err := hex.DecodeString(e.seedHex); err != nil {
 			return envConfig{}, fmt.Errorf("RACEGEN_SEED_HEX invalid hex: %w", err)
 		}
-	} else {
-		// Fail-closed: en prod/staging un seed ausente deja la corrida
-		// no-reproducible y rompe el replay del audit log que exige la
-		// certificación (GLI-19 §3.3 — known-input/seeding). Solo dev (o
-		// APP_ENV vacío) tolera el fallback crypto/rand de makeMT.
-		appEnv := strings.ToLower(strings.TrimSpace(os.Getenv("APP_ENV")))
-		switch appEnv {
-		case "prod", "production", "staging", "stg":
-			return envConfig{}, fmt.Errorf("RACEGEN_SEED_HEX is required when APP_ENV=%s (audit replay must be deterministic — GLI-19 §3.3)", appEnv)
-		}
 	}
+	// NOTE: whether a seed is allowed at all is decided per build by
+	// makeSource (source_prod.go / source_lab.go). Production builds REJECT
+	// any seed (GLI-19: production seeding must be unpredictable); gli_lab
+	// builds REQUIRE one. The previous fail-closed rule ("prod requires a
+	// seed for audit replay") inverted the standard and was finding H2 of
+	// docs/AUDITORIA-RNG-GLI19.md.
 
 	return e, nil
 }

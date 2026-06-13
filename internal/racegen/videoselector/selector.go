@@ -211,7 +211,7 @@ func ipfExactaStep(weights []float64, idx map[[2]int][]int, targetExacta, factor
 
 // Select draws one Result. r = CertifiedFloat * totalW, then binary
 // search for the smallest cumulative >= r.
-func (s *Selector) Select(mt *rng.MT19937) Result {
+func (s *Selector) Select(mt rng.Source) Result {
 	r := rng.CertifiedFloat(mt) * s.totalW
 	// sort.Search returns the smallest index i for which
 	// s.cumulative[i] >= r. CertifiedFloat ∈ [0, 1) so r ∈ [0, totalW)

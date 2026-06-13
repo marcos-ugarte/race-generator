@@ -55,7 +55,7 @@ type VideoName struct {
 // the selected pool entry's Order. Phase 2 ships the full Order from
 // production ES data, so the shuffle the TS code applied (a fallback
 // for missing enriched data) is no longer needed.
-func GenerateFinish(mt *rng.MT19937, cfg config.GameTypeConfigExt, sel *videoselector.Selector) FinishData {
+func GenerateFinish(mt rng.Source, cfg config.GameTypeConfigExt, sel *videoselector.Selector) FinishData {
 	pick := sel.Select(mt)
 
 	time1 := rng.CertifiedFloatRange(mt, cfg.FinishTimeRange.Min, cfg.FinishTimeRange.Max, 2)
@@ -111,7 +111,7 @@ func (f FinishData) Order() []int { return f.order }
 //     cfg.Interval1TimeRange, with +0.05/+0.06 offsets for rank 2.
 //   - Checkpoint 2 (if IntervalCount >= 2): 75% first match, 70% second
 //     match. Times from cfg.Interval2TimeRange with +0.07/+0.07.
-func generateIntervals(mt *rng.MT19937, cfg config.GameTypeConfigExt, finalFirst, finalSecond int) map[string]map[string]IntervalPosition {
+func generateIntervals(mt rng.Source, cfg config.GameTypeConfigExt, finalFirst, finalSecond int) map[string]map[string]IntervalPosition {
 	n := cfg.NumberCompetitor
 	out := make(map[string]map[string]IntervalPosition, cfg.IntervalCount)
 

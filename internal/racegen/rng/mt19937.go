@@ -1,15 +1,19 @@
-// Package rng implementa el RNG certificado GLI-19 usado por el generador.
+// Package rng implementa la fuente de aleatoriedad certificada GLI-19 del
+// generador. La fuente de PRODUCCIÓN es el HMAC-DRBG SHA-256 (hmac_drbg.go,
+// SP 800-90A) sembrado de crypto/rand.
 //
-// MT19937 según Matsumoto & Nishimura (1997). Período 2^19937-1.
-// Espejo funcional de virteon-platform/packages/game-engine/src/rng/MersenneTwister.ts.
+// MT19937 (este archivo) según Matsumoto & Nishimura (1997), período
+// 2^19937-1, espejo funcional de virteon-platform MersenneTwister.ts.
+// Se conserva ÚNICAMENTE como Source determinista para tests (golden
+// vectors de paridad con el legacy TS) — NO es apto como fuente de
+// producción bajo GLI-19 (estado recuperable de 624 salidas; hallazgo H1
+// de docs/AUDITORIA-RNG-GLI19.md).
 package rng
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 )
 
@@ -72,22 +76,6 @@ func NewMT19937WithSeedHex(seedHex string) (*MT19937, error) {
 	return mt, nil
 }
 
-// NewMT19937FromOSEntropy mezcla crypto/rand (32 bytes) y devuelve un MT19937
-// con seedHex generado dinámicamente. Devuelve también el seedHex para audit.
-// Para producción es preferible NewMT19937WithSeedHex con seed determinista.
-func NewMT19937FromOSEntropy() (*MT19937, string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return nil, "", fmt.Errorf("crypto/rand: %w", err)
-	}
-	seedHex := hex.EncodeToString(buf)
-	mt, err := NewMT19937WithSeedHex(seedHex)
-	if err != nil {
-		return nil, "", err
-	}
-	return mt, seedHex, nil
-}
-
 // NextUint32 emite un uint32 uniforme [0, 2^32-1].
 func (mt *MT19937) NextUint32() uint32 {
 	if mt.index >= mtN {
@@ -104,11 +92,6 @@ func (mt *MT19937) NextUint32() uint32 {
 	return y
 }
 
-// NextFloat emite un float64 uniforme en [0, 1).
-func (mt *MT19937) NextFloat() float64 {
-	return float64(mt.NextUint32()) / 4294967296.0
-}
-
 // Advance descarta n valores (GLI-19 §3.2.6 background cycling).
 func (mt *MT19937) Advance(n int) {
 	for i := 0; i < n; i++ {
@@ -119,30 +102,11 @@ func (mt *MT19937) Advance(n int) {
 // GenerationCount devuelve cuántos uint32 se han emitido desde el seed.
 func (mt *MT19937) GenerationCount() uint64 { return mt.gen }
 
-// State retorna una copia del estado para snapshot/reproducibilidad.
-type State struct {
-	S   [mtN]uint32 `json:"s"`
-	Idx int         `json:"idx"`
-	Gen uint64      `json:"gen"`
-}
-
-// State devuelve una copia del estado interno (independiente del MT19937).
-func (mt *MT19937) State() State {
-	return State{S: mt.state, Idx: mt.index, Gen: mt.gen}
-}
-
-var errStateInvalid = errors.New("estado MT19937 inválido")
-
-// RestoreState pone el RNG en un estado previo.
-func (mt *MT19937) RestoreState(s State) error {
-	if s.Idx < 0 || s.Idx > mtN {
-		return errStateInvalid
-	}
-	mt.state = s.S
-	mt.index = s.Idx
-	mt.gen = s.Gen
-	return nil
-}
+// NOTA: los snapshots de estado (State/RestoreState) y NextFloat se
+// eliminaron de la API del paquete — exponer el estado interno era
+// exactamente el hazard R4 que esta rama elimina, y ya no tenían ningún
+// consumidor de producción. Los tests que los necesitan los definen en
+// mt19937_testonly_test.go (jamás se compilan en un binario).
 
 // twist regenera los 624 uint32 internos.
 func (mt *MT19937) twist() {

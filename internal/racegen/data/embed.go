@@ -249,7 +249,7 @@ func parsePool(gameType string, numComp int, raw []byte) *Pool {
 
 // PickName is a stateless single uniform draw. Cooldown logic lives in
 // generators/competitors.go (Phase 3 — out of scope here).
-func PickName(mt *rng.MT19937) string {
+func PickName(mt rng.Source) string {
 	pool := DogNames()
 	if len(pool) == 0 {
 		panic("data: empty name pool")
@@ -261,7 +261,7 @@ func PickName(mt *rng.MT19937) string {
 // PickVideo is a stateless single uniform draw. Phase 3 IPF selector
 // builds a weighted selector on top of Pool.Entries.
 // Returns (zero, false) if gameType is unknown.
-func PickVideo(mt *rng.MT19937, gameType string) (VideoFinish, bool) {
+func PickVideo(mt rng.Source, gameType string) (VideoFinish, bool) {
 	p := VideoPool(gameType)
 	if p == nil || p.Len() == 0 {
 		return VideoFinish{}, false

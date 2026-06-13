@@ -21,8 +21,7 @@ ver [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 ```bash
 mkdir -p data
 
-# Corrida determinista (seed fijo), dos disciplinas, DB local:
-RACEGEN_SEED_HEX=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+# Corrida normal (HMAC-DRBG sembrado del SO), dos disciplinas, DB local:
 DB_PATH=./data/relay.db \
 RACEGEN_AUDIT_PATH=./data/racegen-audit.jsonl \
 RACEGEN_GAMETYPES=dog8,dog6 \
@@ -71,19 +70,20 @@ Fuente autoritativa: `loadEnv` en `cmd/race-generator/main.go:705`.
 |---|---|---|---|
 | `DB_PATH` | `./data/relay.db` | Ruta de la SQLite de salida (rondas + resultados). | No |
 | `RACEGEN_AUDIT_PATH` | `./data/racegen-audit.jsonl` | Audit log GLI append-only (SHA-256 encadenado). | No |
-| `RACEGEN_SEED_HEX` | (vacío → `crypto/rand` en dev) | Seed de 64 chars hex para el RNG. Debe decodificar como hex válido. | **Sí si `APP_ENV` ∈ {prod, production, staging, stg}** |
-| `APP_ENV` | (vacío) | `prod`/`production`/`staging`/`stg` activan el fail-closed del seed. Vacío/`dev` lo tolera. | No |
+| `RACEGEN_SEED_HEX` | (debe estar VACÍO en producción) | Seed de 64 hex — **solo builds `-tags gli_lab`** (replay del laboratorio). Un build de producción **aborta si está presente**. | Solo en builds gli_lab |
+| `APP_ENV` | (vacío) | `prod`/`staging`/`dev` — informativo. | No |
 | `RACEGEN_GAMETYPES` | todas las soportadas (`dog8,dog6,horse_classic`) | Disciplinas coma-separadas, trim + dedup, orden preservado. | No |
 | `RACEGEN_HORIZON` | `25` | Rondas futuras pre-generadas por gameType. **Mínimo 2.** | No |
 | `RACEGEN_JACKPOT_INIT` | `45000.00` (`generators.JackpotInitialValue`) | Valor inicial del jackpot sintético. Debe ser ≥ 0. | No |
 | `RACEGEN_TICK_MS` | `1000` | Frecuencia del scheduler en ms. **Mínimo 1.** | No |
 
-> **Seed obligatorio en prod/staging.** Con `APP_ENV` ∈ {prod, production,
-> staging, stg}, `RACEGEN_SEED_HEX` vacío hace **fallar el arranque**
-> (`main.go:790-794`, GLI-19 §3.3): el audit replay debe ser determinista. **El
-> seed nunca se commitea** — se inyecta en deploy (env/secrets/.env fuera de
-> git). El `RACEGEN_SEED_HEX` se valida (64 chars + hex) **antes** de abrir el
-> audit o la DB (`main.go:778`).
+> **Seeding en producción (GLI-19).** El binario de producción instancia un
+> HMAC-DRBG (SP 800-90A) desde el CSPRNG del SO y **aborta si
+> `RACEGEN_SEED_HEX` está presente** (`source_prod.go` — la semilla de
+> producción debe ser impredecible; una corrida reproducible permitiría
+> precomputar resultados). El replay determinista existe SOLO en builds
+> `-tags gli_lab` (jamás se despliegan), donde la seed es obligatoria. Si se
+> proporciona, la seed se valida (64 chars + hex) antes de abrir audit/DB.
 
 > **Defaults compartidos.** `DB_PATH` también tiene default `./data/relay.db`
 > en `internal/config/config.go:77`; el binario usa el de `loadEnv`.
@@ -117,12 +117,10 @@ identidades de `internal/config/config.go` (`GAME_TYPES`).
 
 ## 5. Despliegue en producción
 
-1. **Seed (GLI).** Inyectar `RACEGEN_SEED_HEX` (64 hex) por env/secrets/.env
-   fuera de git — **nunca** hardcodeado en `docker-compose.yml`. El compose ya
-   trae defaults dev seguros con seed vacío (crypto/rand) y comenta dónde poner
-   `APP_ENV` + seed.
-2. **`APP_ENV`.** Fijar `prod` (o `staging`/`stg`) para activar el fail-closed:
-   sin seed, el binario no arranca.
+1. **Seed (GLI).** NO inyectar `RACEGEN_SEED_HEX` en producción: el binario
+   aborta si está presente. Eliminar cualquier seed heredado de despliegues
+   anteriores (env, secrets, .env) antes de actualizar a esta versión.
+2. **`APP_ENV`.** Fijar `prod` (informativo para logs/operación).
 3. **Volumen `/data`.** `DB_PATH=/data/relay.db` + `RACEGEN_AUDIT_PATH=/data/racegen-audit.jsonl`
    sobre un volumen nombrado (compose: `racegen-data`) para que `relay.db` y el
    audit persistan entre reinicios. El usuario del contenedor es `1000:1000`.
@@ -134,8 +132,7 @@ identidades de `internal/config/config.go` (`GAME_TYPES`).
 Ejemplo de inyección de seed en deploy:
 
 ```bash
-APP_ENV=prod RACEGEN_SEED_HEX="$(cat /run/secrets/racegen_seed)" \
-  docker compose up -d
+APP_ENV=prod docker compose up -d   # sin RACEGEN_SEED_HEX — ver paso 1
 ```
 
 ---
@@ -177,13 +174,17 @@ APP_ENV=prod RACEGEN_SEED_HEX="$(cat /run/secrets/racegen_seed)" \
 
 ## 7. Reproducibilidad / replay GLI
 
-La salida es determinista dado **seed + audit log**:
+Reproducibilidad (solo builds `-tags gli_lab`):
 
-1. El audit `init` registra el `seedHex` efectivamente usado (`main.go:217`).
-   En una corrida dev con seed vacío, ese es el `crypto/rand` generado — léelo
-   ahí para poder reproducir.
-2. **Dentro de cada ronda** la secuencia del MT es fija (orden de consumo en
-   `GenerateGame`), así que el mismo seed reproduce cada ronda byte-a-byte.
+1. El audit `init` registra un descriptor de la fuente (`rngSource`) y, en
+   builds de laboratorio, un **fingerprint SHA-256** de la seed — nunca la
+   seed misma (la seed de una corrida de evidencia se registra por separado
+   en la metadata de la corrida). En producción la corrida es no
+   reproducible **por diseño** (GLI-19: imprevisibilidad del seeding).
+2. En un build gli_lab, la secuencia de draws es función exclusiva de la
+   seed (entropía HKDF determinista; el reseed por frontera de ronda no
+   consume reloj). Para evidencia con identidad de ronda también fija se usa
+   `cmd/rngextract -mode game` (slot inicial fijo).
 3. **Entre rondas**, el descarte `N` (1..100) viene de `crypto/rand`, así que
    re-ejecutar con el mismo seed **no** reproduce solo: hay que re-aplicar los
    `discard` registrados en cada `state_mod` del audit.
@@ -206,7 +207,7 @@ derivó → **no rebaselinar** (invalidaría la garantía de replay GLI).
 
 | Síntoma | Causa probable | Acción |
 |---|---|---|
-| `RACEGEN_SEED_HEX is required when APP_ENV=prod` (arranque aborta) | Fail-closed: `APP_ENV` prod/staging sin seed. | Inyectar `RACEGEN_SEED_HEX` (64 hex), o desactivar `APP_ENV` solo en dev. |
+| `RACEGEN_SEED_HEX is set but this is a production build` (arranque aborta) | Seed heredado de la semántica antigua en el entorno de deploy. | **Eliminar** `RACEGEN_SEED_HEX` del entorno (env/secrets/.env). El replay con seed es solo de builds `-tags gli_lab`. |
 | `RACEGEN_SEED_HEX must be 64 hex chars` / `invalid hex` | Seed mal formado. | Usar exactamente 64 chars hex válidos. |
 | `unknown game type "horse"` (o `dog63`) | Pediste una disciplina no registrada en racegen. | Solo `dog8`, `dog6`, `horse_classic` en `RACEGEN_GAMETYPES`. |
 | `RACEGEN_HORIZON N: must be >= 2` | Horizonte < 2; el webview necesita 2 futuras. | Subir a ≥ 2 (default 25). |

@@ -53,7 +53,7 @@ Prometheus dependencies of the monolith are gone.
 |-----------------------|-------------------------------|---------|
 | `DB_PATH`             | `./data/relay.db`             | SQLite output DB (rounds + results). |
 | `RACEGEN_AUDIT_PATH`  | `./data/racegen-audit.jsonl`  | Append-only GLI replay/audit log. |
-| `RACEGEN_SEED_HEX`    | (empty → crypto/rand in dev)  | 64-hex-char seed for the RNG. **Required when `APP_ENV` is `prod`/`staging`** so audit replay is deterministic (GLI-19 §3.3). |
+| `RACEGEN_SEED_HEX`    | (must be empty in production) | 64-hex-char seed — **gli_lab builds only** (`go build -tags gli_lab`). A production build **aborts if set**: production seeding is always non-deterministic (HMAC-DRBG over the OS CSPRNG, GLI-19 ch.3). |
 | `RACEGEN_GAMETYPES`   | all supported                 | Comma-separated disciplines, e.g. `dog8,dog6,horse_classic`. |
 | `RACEGEN_HORIZON`     | `25`                          | Number of future rounds to keep generated (min 2). |
 | `RACEGEN_JACKPOT_INIT`| generator default             | Initial synthetic jackpot value. |
@@ -67,11 +67,15 @@ Prometheus dependencies of the monolith are gone.
 ```bash
 mkdir -p data
 
-# Deterministic run (fixed seed), two disciplines, to a local DB:
-RACEGEN_SEED_HEX=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+# Normal run (HMAC-DRBG seeded from OS entropy), two disciplines, local DB:
 DB_PATH=./data/relay.db \
 RACEGEN_GAMETYPES=dog8,dog6 \
 go run ./cmd/race-generator
+
+# Deterministic LAB run (bit-exact replay, never deployed) — note -tags gli_lab:
+RACEGEN_SEED_HEX=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+DB_PATH=./data/relay.db \
+go run -tags gli_lab ./cmd/race-generator
 
 # Or via Makefile (same fixed dev seed, all three disciplines):
 make run-local
@@ -96,10 +100,11 @@ Its HEALTHCHECK is a WAL-freshness probe: the generator writes continuously, so
 `/data/relay.db-wal` (or the checkpointed `/data/relay.db`) must have been
 touched within the last 600s.
 
-> **Seed in prod/staging.** `docker-compose.yml` ships safe dev defaults with an
-> *empty* seed (crypto/rand, non-reproducible). With `APP_ENV=prod|staging|stg`
-> the binary **fail-closes unless `RACEGEN_SEED_HEX` is set** (GLI replay). Inject
-> the seed at deploy time — never hardcode a real seed in the compose file.
+> **Seeding in production.** The production binary instantiates an HMAC-DRBG
+> (SP 800-90A) from the OS CSPRNG and **aborts if `RACEGEN_SEED_HEX` is set**
+> (GLI-19: production seeding must be unpredictable). Deterministic replay
+> exists only in `-tags gli_lab` builds, which are never deployed. Do NOT
+> inject a seed at deploy time.
 
 ## Build & test
 

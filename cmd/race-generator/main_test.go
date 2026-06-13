@@ -298,39 +298,28 @@ func TestLoadEnv_SeedHexWrongLength(t *testing.T) {
 	}
 }
 
-// TestLoadEnv_SeedHexEmptyOKInDev verifies that in dev (APP_ENV unset or
-// "dev") an empty seed falls through to the crypto/rand path (loadEnv
-// accepts it; makeMT handles it).
-func TestLoadEnv_SeedHexEmptyOKInDev(t *testing.T) {
-	t.Setenv("RACEGEN_SEED_HEX", "")
-	t.Setenv("APP_ENV", "dev")
-	e, err := loadEnv()
-	if err != nil {
-		t.Fatalf("expected nil err for empty seed in dev, got %v", err)
-	}
-	if e.seedHex != "" {
-		t.Errorf("expected empty seedHex passthrough, got %q", e.seedHex)
-	}
-}
-
-// TestLoadEnv_SeedHexEmptyFailClosedInProd verifies the fail-closed rule:
-// in prod/staging an empty RACEGEN_SEED_HEX must abort, because a
-// non-reproducible run breaks audit-log replay (GLI-19 §3.3).
-func TestLoadEnv_SeedHexEmptyFailClosedInProd(t *testing.T) {
-	for _, env := range []string{"prod", "production", "staging", "stg"} {
-		t.Run(env, func(t *testing.T) {
+// TestLoadEnv_SeedHexEmptyOK verifies that an empty seed is accepted by
+// loadEnv in any APP_ENV: production seeding is non-deterministic by design
+// (GLI-19 ch.3) and whether a seed is allowed at all is decided per build
+// by makeSource (source_prod.go / source_lab.go).
+func TestLoadEnv_SeedHexEmptyOK(t *testing.T) {
+	for _, env := range []string{"dev", "prod", "production", "staging", "stg", ""} {
+		t.Run("APP_ENV="+env, func(t *testing.T) {
 			t.Setenv("RACEGEN_SEED_HEX", "")
 			t.Setenv("APP_ENV", env)
-			_, err := loadEnv()
-			if err == nil {
-				t.Fatalf("expected fail-closed error for empty seed when APP_ENV=%s, got nil", env)
+			e, err := loadEnv()
+			if err != nil {
+				t.Fatalf("expected nil err for empty seed (APP_ENV=%s), got %v", env, err)
 			}
-			if !strings.Contains(err.Error(), "RACEGEN_SEED_HEX is required") {
-				t.Errorf("error should mention the seed requirement; got: %v", err)
+			if e.seedHex != "" {
+				t.Errorf("expected empty seedHex passthrough, got %q", e.seedHex)
 			}
 		})
 	}
 }
+
+// The per-build makeSource contract is pinned in source_prod_test.go
+// (!gli_lab) and source_lab_test.go (gli_lab).
 
 // ----------------------------------------------------------------------
 // Plan 02 Task 2 — future-horizon scheduler tests

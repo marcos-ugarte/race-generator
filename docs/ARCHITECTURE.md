@@ -249,8 +249,9 @@ Position)` (`uniqueIndexDDL`, línea 184) evita filas duplicadas por posición.
   exactamente la misma secuencia de descartes.
 - **Validación de paridad**: golden vectors en CI (garantía de no-drift del
   RNG) + harness de paridad contra DS/virteon (Roadmap). El audit
-  `init` fija el `seedHex` efectivo; `audit.Verify` (`audit/log.go:171`)
-  comprueba que la cadena SHA-256 no fue alterada.
+  `init` registra el descriptor de la fuente (`rngSource`; en builds gli_lab
+  incluye el fingerprint SHA-256 de la seed — nunca la seed); `audit.Verify`
+  (`audit/log.go:171`) comprueba que la cadena SHA-256 no fue alterada.
 
 ---
 
@@ -302,10 +303,12 @@ Mismo **contrato**, dos servicios **separados**: estandarización, no fusión.
   línea 146; `Verify`, línea 171). Genesis con `prevHash==""`, `seq` monótono.
   Imposible reescribir el pasado sin invalidar la cadena → evidencia de que la
   corrida certificada es la que ocurrió.
-- **Seed fail-closed.** `loadEnv` (`main.go:778-795`): con `APP_ENV` ∈
-  {`prod`,`production`,`staging`,`stg`} un `RACEGEN_SEED_HEX` ausente **aborta**
-  el binario (GLI-19 §3.3 — el replay debe ser determinista). En dev se tolera
-  `crypto/rand`.
+- **Seed fail-closed (invertido respecto al diseño original).** Un build de
+  producción **aborta si `RACEGEN_SEED_HEX` está presente** (`source_prod.go`):
+  la fuente es un HMAC-DRBG SP 800-90A sembrado del CSPRNG del SO y el seeding
+  de producción debe ser impredecible (GLI-19 cap. 3). El replay determinista
+  con seed existe solo en builds `-tags gli_lab` (banco de pruebas del
+  laboratorio), que nunca se despliegan.
 - **Disciplinas.** `dog8` (541) y `dog6` (141) están calibradas contra DS y son
   las **abiertas**. `horse_classic` (241) tiene pool de finish **real** (el
   ganador sí tracks al vendor) pero **odds placeholder** (calibración
