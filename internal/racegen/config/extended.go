@@ -785,8 +785,8 @@ func horseClassicConfig() GameTypeConfigExt {
 		// 1.1765 the RTP implies — the real DS book runs slightly tighter.
 		OverroundTarget:    1.1655,
 		OverroundTolerance: 0.003,
-		OverroundShift:    1.159,
-		OverroundLogSigma: 0.30,
+		OverroundShift:     1.159,
+		OverroundLogSigma:  0.30,
 		// Lowered from 0.20: the per-race shape concentration κ compresses the
 		// favorite; 0.10 keeps the favorite from running too short vs DS.
 		ShapeConcentrationSigma: 0.10,
