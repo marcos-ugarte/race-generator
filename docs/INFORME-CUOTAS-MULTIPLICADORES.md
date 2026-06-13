@@ -20,7 +20,11 @@ Reconectado Elastic, se hizo la **medición de tie-rate definitiva con dedup-por
 - **dog8/dog6 confirmados indistinguibles** por medición limpia — NO había nada que arreglar (la decisión de no recalibrarlos fue correcta; el agregado del workflow estaba mal medido).
 - **horse_classic: tie-rate cerrado.** Se activó `RankGap` (la palanca de orden-conjunto; la dispersión per-posición no lo movía) con GapMean = diferencias de la escalera DS y GapStd/GapMin tuneados empíricamente (7 iteraciones). GA → 24.2-24.4% en 2 semillas, manteniendo overround (1.1656) y rangos (≤1.5%).
 
-**Estado WIN de horse: overround + escalera por rango + tie-rate TODOS DS-matched.** Único pendiente de cuotas: el **tail de FORECAST/exacta** (ForecastRank sigue off, sin referencia DS de exacta para 241) → gate de forecast 241 cerrado; el mercado WIN ya casa.
+**Estado WIN de horse: overround + escalera por rango + tie-rate TODOS DS-matched.**
+
+**FORECAST/exacta de horse — CERRADO 2026-06-13.** La señal de exacta del 241 NO requería captura nueva: ya estaba en el array `odds` (`odds[7..48]`, factor = exacta_ij/(win_i·win_j)). Medida por rango del primer corredor sobre ~12.6M parejas, sale una rampa monótona idéntica en forma a dogs: `[0.903, 0.941, 0.967, 0.996, 1.025, 1.050, 1.070]` (favorito-led ~10% más corto → outsider-led ~7% más largo; media 0.9933). Se activó `ForecastRank` con esa rampa y `CombinedFactor.Mean=0.9933`. Verificado en 80k carreras GA: el factor de forecast por rango casa con DS **dentro de ±0.002 en los 7 rangos** (era plano 1.0 → favorito-led ~10.7% demasiado largo, +EV para el jugador).
+
+**Estado FINAL horse_classic: WIN (overround+rango+tie) Y FORECAST (exacta-tilt) DS-matched.** Único elemento aún conservador: el acoplamiento cuotas↔resultado es Mallows (no Plackett-Luce) — no afecta las distribuciones de valores de cuota (solo permuta el multiset por ronda); cerrarlo con PL requeriría medir la condicional DS P(2º-rango|1º-rango) del 241, opcional.
 
 ---
 

@@ -749,18 +749,21 @@ func dog6Config() GameTypeConfigExt {
 //   - PER-RANK WIN-ODDS MEDIANS: PositionConstraints means set to the DS
 //     per-rank ladder (4.07/4.56/5.11/6.09/7.39/9.24/11.47). GA now tracks
 //     DS within ±1.7% per rank (favorite was −9%, now −1.6%).
-//   - TIE-RATE (within-matrix 1dp repeat): NOW DS-matched. DS measured at
-//     24.2% (dedup-by-gameId, n=18k distinct games, dedup==raw so no
-//     lifecycle bias); RankGap enabled+tuned below brings GA to 24.2-24.4%.
-//   - STILL NOT DS-fitted: the FORECAST exacta tilt (ForecastRank DISABLED,
-//     flat CombinedFactor — no DS exacta reference for 241); the coupling is
-//     Mallows RIM (no PL weights for 241).
+//   - TIE-RATE (within-matrix 1dp repeat): DS-matched. DS measured at 24.2%
+//     (dedup-by-gameId, n=18k distinct games, dedup==raw so no lifecycle
+//     bias); RankGap enabled+tuned below brings GA to 24.2-24.5%.
+//   - FORECAST exacta tilt: DS-matched (2026-06-13). ForecastRank enabled
+//     with the measured per-rank ladder; GA per-rank forecast factor tracks
+//     DS within ±0.002 across all 7 ranks. CombinedFactor.Mean set to the
+//     measured DS global (0.9933).
 //
-// The WIN market (overround + per-rank ladder + tie-rate) is now DS-matched.
-// Remaining "paridad real" follow-up for 241: a DS exacta-tilt reference, then
-// enable/calibrate ForecastRank + PL on the FORECAST tail and reverify. Until
-// the forecast tail is confirmed, keep the production gate closed for 241
-// FORECAST odds (WIN odds and the certifiable RNG surface are DS-matched).
+// The full 241 odds surface (WIN overround + per-rank + tie-rate, and FORECAST
+// exacta tilt) is now DS-matched on 100k-race studies. Only the odds↔finish
+// COUPLING remains structurally conservative (Mallows RIM, not PL — no DS
+// joint (1st,2nd) conditional measured for 241 yet); the WIN/forecast VALUE
+// distributions above are unaffected by the coupling (it only permutes the
+// per-round multiset). Remaining follow-up if PL parity is wanted for 241:
+// measure the DS P(2nd-rank|1st-rank) and switch OddsFinishCoupling to PL.
 func horseClassicConfig() GameTypeConfigExt {
 	return GameTypeConfigExt{
 		// Identity
@@ -803,11 +806,24 @@ func horseClassicConfig() GameTypeConfigExt {
 			{Mean: 9.24, Std: 1.60, Min: 6.0, Max: 16.0},
 			{Mean: 11.47, Std: 1.90, Min: 7.0, Max: 17.5},
 		},
-		// Flat forecast combined factor (placeholder; ForecastRank disabled).
-		CombinedFactor: PositionConstraint{Mean: 1.0, Std: 0.0567, Min: 0.85, Max: 1.15},
+		// CombinedFactor.Mean is the GLOBAL forecast factor; set to the measured
+		// DS mean for 241 (0.9933, NOT the placeholder 1.0) so it matches
+		// mean(ForecastRank.Mean) as the config validation requires. When
+		// ForecastRank is enabled it supplies the per-rank factor; CombinedFactor
+		// is only the declared global + the disabled-fallback.
+		CombinedFactor: PositionConstraint{Mean: 0.9933, Std: 0.0567, Min: 0.85, Max: 1.15},
 
-		// ForecastRank DISABLED — no DS exacta-tilt reference for betoffer 241.
-		ForecastRank: ForecastRankFactor{Enabled: false},
+		// ForecastRank ENABLED 2026-06-13: DS exacta-tilt for 241 measured from
+		// the gameRound odds arrays (forecast_ij / (win_i·win_j), averaged by
+		// the win-rank of the first runner; n≈12.6M pairs — see
+		// docs/INFORME-CUOTAS-MULTIPLICADORES.md). Favorite-led pairs price ~10%
+		// shorter, scaling to ~7% longer for outsider-led — the same monotone
+		// tilt dogs show. mean(Mean)=0.9933 == CombinedFactor.Mean (validated).
+		ForecastRank: ForecastRankFactor{
+			Enabled: true,
+			Mean:    []float64{0.9026, 0.9407, 0.9675, 0.9964, 1.0253, 1.0503, 1.0702},
+			Std:     0.0567, Min: 0.78, Max: 1.22,
+		},
 
 		// OddsFinishCoupling: Mallows RIM (no PL weights available for 241).
 		// A modest Theta gives a mild favorite-win bias; Theta=0 would be
