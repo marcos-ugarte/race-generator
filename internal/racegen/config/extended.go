@@ -749,20 +749,18 @@ func dog6Config() GameTypeConfigExt {
 //   - PER-RANK WIN-ODDS MEDIANS: PositionConstraints means set to the DS
 //     per-rank ladder (4.07/4.56/5.11/6.09/7.39/9.24/11.47). GA now tracks
 //     DS within ±1.7% per rank (favorite was −9%, now −1.6%).
-//   - STILL NOT DS-fitted: the within-matrix TIE-RATE (GA 19.6% vs a DS
-//     aggregate ~25.8%, but that DS figure shares the gamepool-lifecycle
-//     measurement caveat of the dog tie-rates — needs a clean dedup-by-gameId
-//     re-measurement to trust); FORECAST exacta tilt (ForecastRank DISABLED,
+//   - TIE-RATE (within-matrix 1dp repeat): NOW DS-matched. DS measured at
+//     24.2% (dedup-by-gameId, n=18k distinct games, dedup==raw so no
+//     lifecycle bias); RankGap enabled+tuned below brings GA to 24.2-24.4%.
+//   - STILL NOT DS-fitted: the FORECAST exacta tilt (ForecastRank DISABLED,
 //     flat CombinedFactor — no DS exacta reference for 241); the coupling is
-//     Mallows RIM (no PL weights for 241). RankGap stays DISABLED (the
-//     per-position HEAD path already hits the per-rank ladder).
+//     Mallows RIM (no PL weights for 241).
 //
-// Remaining "paridad real" follow-up for betoffer 241: a clean DS tie-rate
-// (dedup) and an exacta-tilt reference, then enable/calibrate RankGap +
-// ForecastRank + PL and reverify. Until tie-rate + forecast are confirmed,
-// keep the GLI/production gate closed for 241 ODDS (the certifiable surface
-// — videoselector.Select() over the REAL pool — and the overround/per-rank
-// WIN level are DS-matched; the exacta tail and tie structure are not yet).
+// The WIN market (overround + per-rank ladder + tie-rate) is now DS-matched.
+// Remaining "paridad real" follow-up for 241: a DS exacta-tilt reference, then
+// enable/calibrate ForecastRank + PL on the FORECAST tail and reverify. Until
+// the forecast tail is confirmed, keep the production gate closed for 241
+// FORECAST odds (WIN odds and the certifiable RNG surface are DS-matched).
 func horseClassicConfig() GameTypeConfigExt {
 	return GameTypeConfigExt{
 		// Identity
@@ -819,8 +817,22 @@ func horseClassicConfig() GameTypeConfigExt {
 			UsePL: false,
 		},
 
-		// RankGap DISABLED — no DS within-matrix tie-rate reference for 241.
-		RankGap: RankGapModel{Enabled: false},
+		// RankGap ENABLED 2026-06-13: DS within-matrix tie-rate for 241 measured
+		// at 24.2% (dedup-by-gameId, n=18k distinct games — see
+		// docs/INFORME-CUOTAS-MULTIPLICADORES.md). The per-position HEAD path
+		// only reached ~19.6% (the tie rate is a joint order-statistic the Std
+		// lever can't move). GapMean ≈ the DS per-rank ladder differences;
+		// GapMin<0 (clamped to 0) injects the zero-gaps that create 1dp ties.
+		// Tuned empirically to hit tie 24% while keeping the per-rank medians.
+		RankGap: RankGapModel{
+			Enabled:         true,
+			GapMean:         []float64{0.49, 0.55, 0.98, 1.30, 1.85, 2.23},
+			GapStd:          []float64{0.385, 0.385, 0.50, 0.615, 0.79, 0.915},
+			GapMin:          []float64{-0.68, -0.68, -0.78, -0.88, -0.98, -1.0},
+			GapMax:          []float64{3, 3, 4, 5, 7, 9},
+			OddsFloor:       1.8,
+			LongshotMaxOdds: 17.0,
+		},
 
 		// Finish / Videos. VideoPoolPath is BOTH the data.VideoPool key and the
 		// URL folder in buildVideoName. The pool IDs ARE the real video file

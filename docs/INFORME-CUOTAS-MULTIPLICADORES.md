@@ -7,7 +7,24 @@
 
 ---
 
-## 0. ADENDA 2026-06-13 — recalibración tras el estudio (estado actual)
+## 0-bis. CIERRE 2026-06-13 — medición tie-rate dedup limpia + horse cerrado
+
+Reconectado Elastic, se hizo la **medición de tie-rate definitiva con dedup-por-gameId** (cardinalidad de gameId con empate / total de gameId distintos, parseando todos los juegos del gamepool). Resultado — los números de tie-rate del workflow eran **erróneos para dogs**:
+
+| Juego | tie DS dedup | tie DS raw | tie GA | Veredicto |
+|---|---|---|---|---|
+| dog8 | **25.6%** | 26.6% | 25.8% | ✅ indistinguible (workflow decía 29.1% — error) |
+| dog6 | **19.0%** | 19.0% | 18.0% | ✅ Δ1pp (workflow decía 14.4% — error) |
+| horse_classic | **24.2%** | 24.2% | 19.6%→**24.2%** | ✅ tras activar RankGap |
+
+- **dog8/dog6 confirmados indistinguibles** por medición limpia — NO había nada que arreglar (la decisión de no recalibrarlos fue correcta; el agregado del workflow estaba mal medido).
+- **horse_classic: tie-rate cerrado.** Se activó `RankGap` (la palanca de orden-conjunto; la dispersión per-posición no lo movía) con GapMean = diferencias de la escalera DS y GapStd/GapMin tuneados empíricamente (7 iteraciones). GA → 24.2-24.4% en 2 semillas, manteniendo overround (1.1656) y rangos (≤1.5%).
+
+**Estado WIN de horse: overround + escalera por rango + tie-rate TODOS DS-matched.** Único pendiente de cuotas: el **tail de FORECAST/exacta** (ForecastRank sigue off, sin referencia DS de exacta para 241) → gate de forecast 241 cerrado; el mercado WIN ya casa.
+
+---
+
+## 0. ADENDA 2026-06-13 — recalibración tras el estudio (previa al cierre)
 
 Tras el estudio se aplicó la rama `racegen/horse-odds-recal` y se reexaminó el tie-rate. **Estado vigente:**
 
